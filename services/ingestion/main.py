@@ -26,7 +26,11 @@ async def shutdown(loop: asyncio.AbstractEventLoop, consumer: ZMQStreamConsumer,
 
 async def main():
     loop = asyncio.get_running_loop()
-    consumer = ZMQStreamConsumer(settings.zmq_sub_endpoint, settings.subscriptions)
+    consumer = ZMQStreamConsumer(
+        endpoint=settings.zmq_sub_endpoint,
+        subscriptions=settings.subscriptions,
+        server_public_key=settings.market_data_public_key
+    )
     publisher = CleanStreamPublisher(settings.zmq_clean_pub_endpoint)
 
     consumer.start()

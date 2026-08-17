@@ -22,7 +22,11 @@ async def shutdown(loop: asyncio.AbstractEventLoop, publisher: ZMQStreamPublishe
 
 async def main():
     loop = asyncio.get_running_loop()
-    publisher = ZMQStreamPublisher(endpoint=settings.zmq_pub_endpoint)
+
+    pub_key = settings.zmq_public_key.encode("utf-8") if settings.zmq_public_key else None
+    sec_key = settings.zmq_secret_key.encode("utf-8") if settings.zmq_secret_key else None
+
+    publisher = ZMQStreamPublisher(endpoint=settings.zmq_pub_endpoint, public_key=pub_key, secret_key=sec_key)
     publisher.start()
 
     for sig in (signal.SIGINT, signal.SIGTERM):
