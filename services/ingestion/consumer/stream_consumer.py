@@ -7,11 +7,17 @@ from typing import AsyncGenerator, Tuple, Dict, Any
 logger = logging.getLogger("ingestion.consumer")
 
 class ZMQStreamConsumer:
-    def __init__(self, endpoint: str, subscriptions: list[str]):
+    def __init__(self, endpoint: str, subscriptions: list[str] | None = None, server_public_key: str | None = None):
         self.endpoint = endpoint
-        self.subscriptions = subscriptions
+        self.subscriptions = subscriptions or [""]
         self.context = zmq.asyncio.Context()
         self.socket = self.context.socket(zmq.SUB)
+
+        if server_public_key:
+            client_pub, client_sec = zmq.curve_keypair()
+            self.socket.curve_secretkey = client_sec
+            self.socket.curve_publickey = client_pub
+            self.socket.curve_serverkey = server_public_key.encode("utf-8")
 
     def start(self) -> None:
         self.socket.connect(self.endpoint)

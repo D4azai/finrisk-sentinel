@@ -6,12 +6,14 @@ services:
       context: ./services/market_data
       dockerfile: Dockerfile
     container_name: market_data_service
+    env_file:
+      - .env
     environment:
       - MARKET_DATA_EXCHANGE_NAME=binance
       - MARKET_DATA_SYMBOLS=["btcusdt","ethusdt"]
       - MARKET_DATA_ZMQ_PUB_ENDPOINT=tcp://0.0.0.0:5555
-    ports:
-      - "5555:5555"
+      - MARKET_DATA_ZMQ_PUBLIC_KEY=${MARKET_DATA_ZMQ_PUBLIC_KEY}
+      - MARKET_DATA_ZMQ_SECRET_KEY=${MARKET_DATA_ZMQ_SECRET_KEY}
     restart: unless-stopped
 
   ingestion:
@@ -21,9 +23,14 @@ services:
     container_name: ingestion_service
     depends_on:
       - market_data
+    env_file:
+      - .env
     environment:
       - INGESTION_ZMQ_SUB_ENDPOINT=tcp://market_data:5555
-      - INGESTION_ZMQ_CLEAN_PUB_ENDPOINT=tcp://0.0.0.0:5556
+      - INGESTION_MARKET_DATA_PUBLIC_KEY=${INGESTION_MARKET_DATA_PUBLIC_KEY}
+      - INGESTION_ZMQ_CLEAN_PUB_ENDPOINTd=tcp://0.0.0.0:5556
+      - INGESTION_ZMQ_PUBLIC_KEY=${INGESTION_ZMQ_PUBLIC_KEY}
+      - INGESTION_ZMQ_SECRET_KEY=${INGESTION_ZMQ_SECRET_KEY}
     ports:
       - "5556:5556"
     restart: unless-stopped
