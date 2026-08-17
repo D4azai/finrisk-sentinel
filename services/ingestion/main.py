@@ -8,8 +8,11 @@ from services.ingestion.filters.health_check import HealthCheckFilter
 from services.ingestion.normalizers.binance_adapter import BinanceAdapter
 from services.ingestion.pipeline.processing_chain import IngestionPipeline
 from services.ingestion.publisher.clean_publisher import CleanStreamPublisher
+from services.logging_helpers import redact_symbol
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+from services.logging_config import configure_app_logging
+
+configure_app_logging()
 logger = logging.getLogger("ingestion.main")
 
 
@@ -52,7 +55,7 @@ async def main():
         if filtered_msg:
             canonical_trade = adapter.adapt(filtered_msg)
             await publisher.publish(canonical_trade)
-            logger.info(f"[INGESTED & PUBLISHED]: {canonical_trade.symbol} @ {canonical_trade.price}")
+            logger.info("[INGESTED & PUBLISHED]: %s @ %s", redact_symbol(canonical_trade.symbol), canonical_trade.price)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 import logging
 from typing import Optional, Dict, Any
 from services.ingestion.filters.base import PipelineFilter
+from services.logging_helpers import redact_symbol
 
 logger = logging.getLogger("ingestion.filter.sequence")
 
@@ -18,10 +19,10 @@ class SequenceValidationFilter(PipelineFilter):
         last_seq = self._last_sequences.get(symbol)
         if last_seq is not None:
             if seq_id <= last_seq:
-                logger.warning(f"Duplicate/out-of-order sequence dropped for {symbol}: {seq_id} <= {last_seq}")
-                return None
+                        logger.warning("Duplicate/out-of-order sequence dropped for %s: %s <= %s", redact_symbol(symbol), seq_id, last_seq)
+                        return None
             if seq_id > last_seq + 1:
-                logger.warning(f"Sequence gap detected for {symbol}: Expected {last_seq + 1}, received {seq_id}")
+                        logger.warning("Sequence gap detected for %s: Expected %s, received %s", redact_symbol(symbol), last_seq + 1, seq_id)
 
         self._last_sequences[symbol] = seq_id
         return payload
