@@ -2,6 +2,7 @@ import time
 import logging
 from typing import Optional, Dict, Any
 from services.ingestion.filters.base import PipelineFilter
+from services.logging_helpers import redact_symbol
 
 logger = logging.getLogger("ingestion.filter.health")
 
@@ -19,7 +20,8 @@ class HealthCheckFilter(PipelineFilter):
         latency = now - event_time_sec
 
         if latency > self.max_staleness_sec:
-            logger.warning(f"Stale packet dropped. Latency: {latency:.2f}s exceeds threshold {self.max_staleness_sec}s")
+            symbol = payload.get("s") or payload.get("symbol")
+            logger.warning("Stale packet dropped for %s. Latency: %.2fs exceeds threshold %s", redact_symbol(symbol), latency, self.max_staleness_sec)
             return None
 
         return payload

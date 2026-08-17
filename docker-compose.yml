@@ -3,8 +3,8 @@ version: '3.8'
 services:
   market_data:
     build:
-      context: ./services/market_data
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/market_data/Dockerfile
     container_name: market_data_service
     env_file:
       - .env
@@ -18,8 +18,8 @@ services:
 
   ingestion:
     build:
-      context: ./services/ingestion
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/ingestion/Dockerfile
     container_name: ingestion_service
     depends_on:
       - market_data

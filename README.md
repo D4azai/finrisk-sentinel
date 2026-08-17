@@ -46,9 +46,13 @@
 - ✓ Per-service configuration isolation
 
 ### 6. **Logging**
-- ✓ Structured logging with timestamps and levels
-- ✓ Descriptive messages in filters and handlers
-- ✓ Logger isolation per module
+- ✓ Structured JSON logging with ISO8601 timestamps
+- ✓ Non-blocking QueueHandler + QueueListener for async-safe logging
+- ✓ Context-aware correlation IDs via contextvars
+- ✓ Automatic PII redaction of sensitive fields
+- ✓ Deterministic symbol obfuscation (HMAC-based)
+- ✓ Optional reversible encryption for sensitive data (Fernet)
+- ✓ Declarative config via logging.config.dictConfig
 
 ---
 
@@ -217,6 +221,141 @@
 | Data Loss | If ingestion service crashes, unprocessed trades lost |
 | Dead Letter Queue | No mechanism to retry/store failed records |
 | Monitoring | No alerting on sequence gaps or circuit breaker opens |
+
+---
+
+## 📝 Logging System Guide
+
+### Overview
+
+The FinRisk Sentinel logging system provides:
+- **Structured JSON output** with ISO8601 timestamps (pythonjsonlogger or fallback)
+- **Non-blocking async logging** via QueueHandler + QueueListener
+- **Context-aware correlation IDs** using contextvars for request tracing
+- **Automatic PII redaction** of sensitive fields (symbols, payloads, tokens)
+- **Optional reversible encryption** for sensitive data (Fernet)
+- **Declarative configuration** via `logging.config.dictConfig()`
+
+### Quick Start
+
+#### Basic Usage (Programmatic)
+
+```python
+from logging.logging_config import configure_app_logging
+from logging.logging_filter import set_correlation_id
+
+# Initialize at process startup
+configure_app_logging()  # Respects LOG_LEVEL env var
+
+# Set correlation ID for this request/task (async-safe)
+set_correlation_id("req_12345")
+
+# Log messages (automatically includes correlation_id)
+import logging
+
+logger = logging.getLogger(__name__)
+logger.info("Processing trade", extra={"symbol": "BTCUSDT"})
+```
+
+#### Declarative Configuration (dictConfig)
+
+```python
+import os
+from logging.logging_config import load_from_dict_config
+from logging.logging_example_config import get_config_for_env
+
+# Load environment-based config
+env = os.getenv("ENVIRONMENT", "development")
+config = get_config_for_env(env)  # Supports env var interpolation like $(LOG_LEVEL)
+load_from_dict_config(config)
+```
+
+### Environment Variables
+
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `LOG_LEVEL` | string | INFO | Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL) |
+| `LOG_USE_QUEUE` | bool | true | Enable non-blocking QueueHandler for async safety |
+| `LOG_HMAC_KEY` | string | (none) | Base64/hex/raw key for deterministic HMAC (optional) |
+| `LOG_FERNET_KEY` | string | (none) | Base64/hex/raw 32-byte Fernet key for reversible encryption (optional) |
+
+### Generating Keys
+
+```bash
+# Generate a Fernet key (for reversible encryption)
+python -c "from services.logging_crypto import generate_fernet_key; print(generate_fernet_key())"
+
+# Generate an HMAC key (for deterministic hashing)
+python -c "from services.logging_crypto import generate_hmac_key; print(generate_hmac_key())"
+```
+
+### Module Reference
+
+#### `logging_config.py`
+- `configure_app_logging()`: Initialize with env-based settings (recommended for most apps)
+- `init_logging(level, use_queue)`: Low-level initialization
+- `load_from_dict_config(config)`: Load from declarative dictConfig with env interpolation
+
+#### `logging_crypto.py`
+- `deterministic_id(value, length)`: Produce stable obfuscated IDs (e.g., `sym_ab12cd34`)
+- `encrypt_value(value)`: Reversible encryption using Fernet (optional)
+- `decrypt_value(token)`: Decrypt Fernet tokens
+- `generate_fernet_key()`: Generate a new Fernet key
+- `generate_hmac_key()`: Generate a new HMAC key
+
+#### `logging_filter.py`
+- `CorrelationIdFilter`: Injects `correlation_id` from contextvars into log records
+- `RedactionFilter`: Redacts sensitive keys in payloads and symbols
+- `set_correlation_id(cid)`: Set correlation ID for current async context
+- `get_correlation_id()`: Get current correlation ID
+
+#### `logging_helpers.py`
+- `redact_symbol(symbol)`: Obfuscate trading symbol (e.g., BTCUSDT → sym_ab12cd34)
+- `redact_payload(obj, keys_to_mask)`: Recursively redact sensitive keys in dict/list
+- `redact_value(val)`: Redact individual values
+
+### Log Output Format
+
+**JSON Structure:**
+```json
+{
+  "ts": "2026-08-17T22:30:56.637+01:00",
+  "level": "INFO",
+  "logger": "services.market_data.connector",
+  "msg": "Processing trade",
+  "correlation_id": "req_12345",
+  "symbol_redacted": "sym_ab12cd34",
+  "payload_redacted": {"p": "<redacted:number>", "q": "<redacted:number>"}
+}
+```
+
+### Security Features
+
+#### Redaction Patterns
+- **Symbols**: Automatically hashed to deterministic IDs (e.g., BTCUSDT → sym_ab12cd34)
+- **Common sensitive keys**: `symbol`, `secret`, `token`, `api_key`, `password`, `account`
+- **Numeric fields**: Masked as `<redacted:number>`
+- **String fields**: Masked as `<redacted:SHA256_PREFIX>`
+
+#### Encryption (Optional)
+If `LOG_FERNET_KEY` is set:
+- Symbols are additionally encrypted (reversible)
+- Stored as `symbol_encrypted` field in logs
+- Allows secure log re-identification with key
+
+### Testing
+
+Unit tests for crypto functions:
+```bash
+pytest services/tests_logging_crypto.py -v
+```
+
+Example test scenarios:
+- HMAC key parsing (base64, hex, raw formats)
+- Fernet key parsing and validation
+- Deterministic ID consistency
+- Encrypt/decrypt roundtrips
+- Redaction of sensitive fields
 
 ---
 

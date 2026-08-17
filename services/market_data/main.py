@@ -2,11 +2,13 @@ import asyncio
 import logging
 import signal
 from services.market_data.config.settings import settings
-from services.market_data.connectors.factory import ConnectorFactory
+from services.market_data.connectors import ConnectorFactory
 from services.market_data.engine.connection_manager import ResilientConnectionManager
 from services.market_data.publisher.stream_publisher import ZMQStreamPublisher
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+from services.logging_config import configure_app_logging
+
+configure_app_logging()
 logger = logging.getLogger("market_data.main")
 
 
