@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
+
 
 class PipelineFilter(ABC):
     @abstractmethod

@@ -1,36 +1,149 @@
-version: '3.8'
+# Local development only. Production uses TLS/SASL Kafka and TLS PostgreSQL.
+x-app: &app
+  build: .
+  image: finrisk-sentinel:local
+  env_file: .env
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  stop_grace_period: 45s
+  networks:
+    - data
 
 services:
-  market_data:
-    build:
-      context: ./services/market_data
-      dockerfile: Dockerfile
-    container_name: market_data_service
-    env_file:
-      - .env
+  postgres:
+    image: postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3
     environment:
-      - MARKET_DATA_EXCHANGE_NAME=binance
-      - MARKET_DATA_SYMBOLS=["btcusdt","ethusdt"]
-      - MARKET_DATA_ZMQ_PUB_ENDPOINT=tcp://0.0.0.0:5555
-      - MARKET_DATA_ZMQ_PUBLIC_KEY=${MARKET_DATA_ZMQ_PUBLIC_KEY}
-      - MARKET_DATA_ZMQ_SECRET_KEY=${MARKET_DATA_ZMQ_SECRET_KEY}
+      POSTGRES_DB: finrisk
+      POSTGRES_USER: finrisk
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Generate .env with scripts/init_local_env.py}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finrisk -d finrisk"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  kafka:
+    image: apache/kafka:3.9.1@sha256:4ceccc577f03f51f6af8dbfda55194d0d892f4fa7913ffbded567ce3895622ed
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_RETENTION_BYTES: 1073741824
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks: [data]
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "kafka:9092", "--list"]
+      interval: 10s
+      timeout: 30s
+      retries: 20
+    restart: unless-stopped
+
+  bootstrap:
+    <<: *app
+    command: ["python", "-m", "services.common.bootstrap"]
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  market_data:
+    <<: *app
+    command: ["python", "-m", "services.market_data.main"]
+    networks: [data, outbound]
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   ingestion:
-    build:
-      context: ./services/ingestion
-      dockerfile: Dockerfile
-    container_name: ingestion_service
+    <<: *app
+    command: ["python", "-m", "services.ingestion.main"]
     depends_on:
-      - market_data
-    env_file:
-      - .env
-    environment:
-      - INGESTION_ZMQ_SUB_ENDPOINT=tcp://market_data:5555
-      - INGESTION_MARKET_DATA_PUBLIC_KEY=${INGESTION_MARKET_DATA_PUBLIC_KEY}
-      - INGESTION_ZMQ_CLEAN_PUB_ENDPOINTd=tcp://0.0.0.0:5556
-      - INGESTION_ZMQ_PUBLIC_KEY=${INGESTION_ZMQ_PUBLIC_KEY}
-      - INGESTION_ZMQ_SECRET_KEY=${INGESTION_ZMQ_SECRET_KEY}
-    ports:
-      - "5556:5556"
+      bootstrap:
+        condition: service_completed_successfully
     restart: unless-stopped
+
+  inspect:
+    <<: *app
+    profiles: [tools]
+    command: ["python", "inspect_stream.py"]
+    healthcheck:
+      disable: true
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+
+  dev_identity:
+    <<: *app
+    env_file: []
+    networks: [data, outbound]
+    command: ["python", "-m", "uvicorn", "services.dev_identity:app", "--host", "0.0.0.0", "--port", "8080", "--no-access-log", "--no-proxy-headers"]
+    environment:
+      DEV_IDENTITY_ENABLED: "true"
+      API_ENVIRONMENT: development
+      API_OIDC_ISSUER: ${API_OIDC_ISSUER:-http://localhost:8081}
+    ports:
+      - "127.0.0.1:8081:8080"
+
+  api:
+    <<: *app
+    env_file: []
+    networks: [data, outbound]
+    command: ["python", "-m", "services.api"]
+    environment:
+      API_ENVIRONMENT: development
+      API_ALLOW_INSECURE_LOCAL: "true"
+      API_DATABASE_URL: ${API_DATABASE_URL:?Run scripts/init_api_env.py}
+      API_OIDC_ISSUER: ${API_OIDC_ISSUER:-http://localhost:8081}
+      API_OIDC_JWKS_URL: ${API_OIDC_JWKS_URL:-http://dev_identity:8080/jwks}
+      API_OIDC_AUDIENCE: finrisk-api
+      API_ALLOW_DEMO_MARKET_DATA: ${API_ALLOW_DEMO_MARKET_DATA:-false}
+      API_ENABLE_PAPER_TRADING: ${API_ENABLE_PAPER_TRADING:-false}
+      API_ENABLE_DEV_LOGIN: ${API_ENABLE_DEV_LOGIN:-false}
+      API_BROWSER_CLIENT_ID: ${API_BROWSER_CLIENT_ID:-}
+      API_BROWSER_AUTHORIZATION_URL: ${API_BROWSER_AUTHORIZATION_URL:-}
+      API_BROWSER_TOKEN_URL: ${API_BROWSER_TOKEN_URL:-}
+      API_BROWSER_REDIRECT_URI: ${API_BROWSER_REDIRECT_URI:-}
+      API_BROWSER_AUTH_AUDIENCE: ${API_BROWSER_AUTH_AUDIENCE:-}
+    ports:
+      - "127.0.0.1:8000:8080"
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+      dev_identity:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  data:
+    internal: true
+  outbound: {}
+
+volumes:
+  postgres_data:
+  kafka_data:

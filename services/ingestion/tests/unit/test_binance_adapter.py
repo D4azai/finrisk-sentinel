@@ -1,16 +1,11 @@
 from datetime import datetime, timezone
+
 from services.ingestion.normalizers.binance_adapter import BinanceAdapter
 
 
 def test_binance_adapter_normalization():
     adapter = BinanceAdapter()
-    raw_payload = {
-        "s": "btcusdt",
-        "p": "65000.50",
-        "q": "1.25",
-        "t": 987654,
-        "T": 1700000000000
-    }
+    raw_payload = {"s": "btcusdt", "p": "65000.50", "q": "1.25", "t": 987654, "T": 1700000000000}
 
     trade = adapter.adapt(raw_payload)
 

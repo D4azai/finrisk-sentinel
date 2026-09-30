@@ -1,5 +1,5 @@
 import time
-import pytest
+
 from services.market_data.engine.circuit_breaker import CircuitBreaker
 
 

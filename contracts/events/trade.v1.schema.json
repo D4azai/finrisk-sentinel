@@ -1,0 +1,93 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "event_id": {
+      "title": "Event Id",
+      "type": "string"
+    },
+    "symbol": {
+      "pattern": "^[A-Z0-9]{1,30}$",
+      "title": "Symbol",
+      "type": "string"
+    },
+    "exchange": {
+      "const": "binance",
+      "default": "binance",
+      "title": "Exchange",
+      "type": "string"
+    },
+    "market_type": {
+      "const": "spot",
+      "default": "spot",
+      "title": "Market Type",
+      "type": "string"
+    },
+    "instrument_id": {
+      "title": "Instrument Id",
+      "type": "string"
+    },
+    "price": {
+      "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,20}|(?=[\\d.]{1,39}0*$)\\d{0,20}\\.\\d{0,18}0*$)",
+      "title": "Price",
+      "type": "string"
+    },
+    "volume": {
+      "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,20}|(?=[\\d.]{1,39}0*$)\\d{0,20}\\.\\d{0,18}0*$)",
+      "title": "Volume",
+      "type": "string"
+    },
+    "sequence_id": {
+      "title": "Sequence Id",
+      "type": "string"
+    },
+    "timestamp": {
+      "format": "date-time",
+      "title": "Timestamp",
+      "type": "string"
+    },
+    "source_event_at": {
+      "format": "date-time",
+      "title": "Source Event At",
+      "type": "string"
+    },
+    "received_at": {
+      "format": "date-time",
+      "title": "Received At",
+      "type": "string"
+    },
+    "normalized_at": {
+      "format": "date-time",
+      "title": "Normalized At",
+      "type": "string"
+    },
+    "quality_flags": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Quality Flags",
+      "type": "array"
+    }
+  },
+  "required": [
+    "event_id",
+    "symbol",
+    "instrument_id",
+    "price",
+    "volume",
+    "sequence_id",
+    "timestamp",
+    "source_event_at",
+    "received_at",
+    "normalized_at"
+  ],
+  "title": "CanonicalTrade",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

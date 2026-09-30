@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "instruments": [
+    {
+      "market": "XCAS",
+      "symbol": "DEMO-MA",
+      "currency": "MAD",
+      "name": "Morocco demo equity (fictional)",
+      "is_demo": true,
+      "source": "FinRisk synthetic development fixture; not an exchange listing",
+      "verified_at": "2026-01-01T00:00:00Z"
+    },
+    {
+      "market": "XNYS",
+      "symbol": "DEMO-US",
+      "currency": "USD",
+      "name": "International demo equity (fictional)",
+      "is_demo": true,
+      "source": "FinRisk synthetic development fixture; not an exchange listing",
+      "verified_at": "2026-01-01T00:00:00Z"
+    }
+  ]
+}

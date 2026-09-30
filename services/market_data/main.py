@@ -1,49 +1,85 @@
 import asyncio
-import logging
-import signal
-from services.market_data.config.settings import settings
+import base64
+import json
+from contextlib import AsyncExitStack, aclosing
+from uuid import uuid4
+
+from services.common.broker import dispatch_forever, make_producer
+from services.common.runtime import Health, bounded_close, run, supervise
+from services.common.settings import InfrastructureSettings
+from services.common.store import Backpressure, Store
+from services.market_data.config.settings import MarketDataSettings
 from services.market_data.connectors.factory import ConnectorFactory
 from services.market_data.engine.connection_manager import ResilientConnectionManager
-from services.market_data.publisher.stream_publisher import ZMQStreamPublisher
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-logger = logging.getLogger("market_data.main")
 
 
-async def shutdown(loop: asyncio.AbstractEventLoop, publisher: ZMQStreamPublisher):
-    logger.info("Executing graceful service shutdown...")
-    publisher.close()
-    tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-    for task in tasks:
-        task.cancel()
-    await asyncio.gather(*tasks, return_exceptions=True)
-    loop.stop()
+def routing_key(envelope):
+    try:
+        payload = (
+            base64.b64decode(envelope.payload_text, validate=True).decode("utf-8")
+            if envelope.payload_encoding == "base64"
+            else envelope.payload_text
+        )
+        message = json.loads(payload)
+        symbol = message.get("data", message)["s"]
+        if isinstance(symbol, str) and symbol.isascii() and symbol.isalnum() and len(symbol) <= 30:
+            return f"{envelope.exchange}:{envelope.market_type}:{symbol.upper()}"
+    except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
+        pass
+    return "invalid"
 
 
 async def main():
-    loop = asyncio.get_running_loop()
+    infrastructure, config = InfrastructureSettings(), MarketDataSettings()
+    health = Health(infrastructure)
+    async with AsyncExitStack() as stack:
+        store = await Store.open(infrastructure)
+        stack.push_async_callback(bounded_close, store.close)
+        instruments = [f"{config.exchange_name}:spot:{symbol.upper()}" for symbol in config.symbols]
+        owner = await stack.enter_async_context(store.collector_ownership(instruments))
+        producer = make_producer(infrastructure)
+        stack.push_async_callback(bounded_close, producer.stop)
+        await producer.start()
+        stack.push_async_callback(health.close)
+        await health.start()
+        connector = ConnectorFactory.create(config.exchange_name, config.symbols)
+        connector.max_payload_bytes = infrastructure.max_payload_bytes
 
-    pub_key = settings.zmq_public_key.encode("utf-8") if settings.zmq_public_key else None
-    sec_key = settings.zmq_secret_key.encode("utf-8") if settings.zmq_secret_key else None
+        async def interrupted(reason):
+            await store.feed_interruption(owner, str(uuid4()), instruments, reason)
+            health.last_frame = 0
+            health.failures.labels("feed_interruption").inc()
 
-    publisher = ZMQStreamPublisher(endpoint=settings.zmq_pub_endpoint, public_key=pub_key, secret_key=sec_key)
-    publisher.start()
+        await interrupted("collector_start_or_restart")
+        manager = ResilientConnectionManager(
+            base_delay=config.base_reconnect_delay_sec,
+            max_delay=config.max_reconnect_delay_sec,
+            max_attempts=config.max_reconnect_attempts,
+            idle_timeout=config.idle_timeout_sec,
+            on_disconnect=interrupted,
+        )
 
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown(loop, publisher)))
+        async def collect():
+            async with aclosing(manager.stream_with_retry(connector.connect_and_stream)) as stream:
+                async for envelope in stream:
+                    while True:
+                        try:
+                            await store.archive_raw(owner, envelope, routing_key(envelope))
+                            break
+                        except Backpressure:
+                            health.last_frame = 0
+                            await asyncio.sleep(1)
+                    health.received.inc()
+                    health.touch()
 
-    connector = ConnectorFactory.create(settings.exchange_name, settings.symbols)
-    manager = ResilientConnectionManager(
-        base_delay=settings.base_reconnect_delay_sec,
-        max_delay=settings.max_reconnect_delay_sec
-    )
-
-    logger.info(f"Market Data Service initialized for '{settings.exchange_name}'. Running stream...")
-
-    async for raw_payload in manager.stream_with_retry(connector.connect_and_stream):
-        topic = raw_payload.get("s", "market_data").lower()
-        await publisher.publish(topic=topic, payload=raw_payload)
+        await supervise(
+            collect(),
+            dispatch_forever(
+                store, producer, [infrastructure.raw_topic, infrastructure.quality_topic], health
+            ),
+            health.watch(store),
+        )
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    run(main)

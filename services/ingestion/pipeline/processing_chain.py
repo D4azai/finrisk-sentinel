@@ -1,8 +1,10 @@
 import logging
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
+
 from services.ingestion.filters.base import PipelineFilter
 
 logger = logging.getLogger("ingestion.pipeline")
+
 
 class IngestionPipeline:
     def __init__(self, filters: List[PipelineFilter]):

@@ -1,7 +1,6 @@
 import pytest
-import asyncio
+
 from services.market_data.engine.connection_manager import ResilientConnectionManager
-from services.market_data.engine.circuit_breaker import CircuitBreaker
 
 
 @pytest.mark.asyncio

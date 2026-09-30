@@ -1,0 +1,12 @@
+services:
+  tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    env_file: .env
+    environment:
+      FINRISK_RUN_INTEGRATION: "1"
+    networks: [data]
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully

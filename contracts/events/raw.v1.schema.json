@@ -1,0 +1,53 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "event_id": {
+      "format": "uuid",
+      "title": "Event Id",
+      "type": "string"
+    },
+    "exchange": {
+      "const": "binance",
+      "default": "binance",
+      "title": "Exchange",
+      "type": "string"
+    },
+    "market_type": {
+      "const": "spot",
+      "default": "spot",
+      "title": "Market Type",
+      "type": "string"
+    },
+    "received_at": {
+      "format": "date-time",
+      "title": "Received At",
+      "type": "string"
+    },
+    "payload_encoding": {
+      "default": "utf8",
+      "enum": [
+        "utf8",
+        "base64"
+      ],
+      "title": "Payload Encoding",
+      "type": "string"
+    },
+    "payload_text": {
+      "maxLength": 87384,
+      "title": "Payload Text",
+      "type": "string"
+    }
+  },
+  "required": [
+    "payload_text"
+  ],
+  "title": "RawEnvelope",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

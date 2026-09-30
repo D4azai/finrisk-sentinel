@@ -1,25 +1,18 @@
 import pytest
+
 from services.ingestion.filters.sequence_check import SequenceValidationFilter
 
 
-@pytest.mark.asyncio
-async def test_sequence_filter_accepts_initial_and_consecutive_ids():
-    seq_filter = SequenceValidationFilter()
-
-    first = await seq_filter.filter({"s": "BTCUSDT", "t": 100})
-    second = await seq_filter.filter({"s": "BTCUSDT", "t": 101})
-
-    assert first is not None
-    assert second is not None
+async def test_filter_has_no_state_before_durable_commit():
+    sequence = SequenceValidationFilter()
+    await sequence.filter({"s": "BTCUSDT", "t": 999999})
+    assert await sequence.filter({"s": "BTCUSDT", "t": 1}) is not None
+    assert await sequence.filter({"s": "BTCUSDT", "t": 1}) is not None
 
 
-@pytest.mark.asyncio
-async def test_sequence_filter_drops_out_of_order_duplicate():
-    seq_filter = SequenceValidationFilter()
-
-    await seq_filter.filter({"s": "BTCUSDT", "t": 100})
-    duplicate = await seq_filter.filter({"s": "BTCUSDT", "t": 100})
-    out_of_order = await seq_filter.filter({"s": "BTCUSDT", "t": 99})
-
-    assert duplicate is None
-    assert out_of_order is None
+@pytest.mark.parametrize(
+    "payload",
+    [{}, {"s": "BTCUSDT", "t": True}, {"s": "BTCUSDT", "t": -1}, {"s": "BTCUSDT", "t": "1"}],
+)
+async def test_bad_sequence_shape(payload):
+    assert await SequenceValidationFilter().filter(payload) is None

@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FinRisk Sentinel</title>
+    <link rel="stylesheet" href="/assets/style.css" />
+    <script src="/assets/browser-auth.js" defer></script>
+    <script src="/assets/app.js" defer></script>
+  </head>
+  <body>
+    <aside class="sidebar">
+      <a class="brand" href="/"
+        >F<span>▥</span><strong>FINRISK<small>SENTINEL</small></strong></a
+      >
+      <p class="nav-label">YOUR WORKSPACE</p>
+      <a href="#overview" class="nav active">◫ &nbsp; Overview</a
+      ><a href="#markets" class="nav">⌁ &nbsp; Market signals</a
+      ><a href="#portfolio" class="nav">▤ &nbsp; Portfolio</a
+      ><a href="#paper" class="nav">⇄ &nbsp; Paper trading</a>
+      <div class="sidebar-foot">
+        <span class="dot"></span> Evidence before action
+        <p>Moroccan & international equities</p>
+      </div>
+    </aside>
+    <main id="overview">
+      <header>
+        <div class="breadcrumb">Workspace <span>/</span> Overview</div>
+        <div class="header-actions">
+          <span id="mode" class="pill">Checking configuration</span
+          ><button id="refresh" class="quiet">↻ Refresh</button
+          ><button id="logout" class="quiet" hidden>Sign out</button>
+        </div>
+      </header>
+      <div
+        id="notice"
+        class="notice"
+        role="status"
+        aria-live="polite"
+        hidden
+      ></div>
+      <section class="title-row">
+        <div>
+          <p class="eyebrow">YOUR MARKET PERSPECTIVE</p>
+          <h1>
+            See the risk.<br class="mobile-only" />
+            Make informed moves.
+          </h1>
+          <p class="muted">
+            Portfolio context and market anomalies, with the evidence in view.
+          </p>
+        </div>
+        <div class="time">
+          <span id="last-updated">Not connected</span
+          ><small>Daily market observations</small>
+        </div>
+      </section>
+      <section id="login-panel" class="panel login-panel">
+        <div>
+          <span class="step">01</span>
+          <h2>Open your workspace</h2>
+          <p id="login-description" class="muted">Loading sign-in options…</p>
+        </div>
+        <form id="login-form" hidden>
+          <label
+            >Local demo identity<select id="login-user">
+              <option value="alice">Alice</option>
+              <option value="bob">Bob</option>
+            </select></label
+          ><button class="primary" type="submit">Enter demo workspace →</button>
+        </form>
+        <button id="provider-login" class="primary" hidden>
+          Sign in securely
+        </button>
+      </section>
+      <div id="application" hidden>
+        <section class="workspace-row">
+          <label>Workspace<select id="workspace"></select></label>
+          <form id="workspace-form" class="inline">
+            <input
+              id="workspace-name"
+              placeholder="New workspace name"
+              aria-label="New workspace name"
+              required
+              maxlength="100"
+            /><button type="submit" class="quiet">+ Create workspace</button>
+          </form>
+        </section>
+        <section class="metrics">
+          <article class="metric">
+            <p>PORTFOLIO VALUE</p>
+            <strong id="total">—</strong
+            ><small id="valuation-status">Select a portfolio</small>
+          </article>
+          <article class="metric">
+            <p>OPEN POSITIONS</p>
+            <strong id="position-count">—</strong
+            ><small>Separate currencies, explicit FX</small>
+          </article>
+          <article class="metric">
+            <p>SELECTED SIGNAL</p>
+            <strong id="signal-summary">—</strong
+            ><small id="signal-subtitle">No instrument selected</small>
+          </article>
+          <article class="metric">
+            <p>EXECUTION MODE</p>
+            <strong class="teal">Simulation</strong
+            ><small>Live broker not connected</small>
+          </article>
+        </section>
+        <section id="markets" class="market-grid">
+          <article class="panel">
+            <div class="panel-top">
+              <div>
+                <p class="eyebrow">MARKET INTELLIGENCE</p>
+                <h2>Instrument watch</h2>
+              </div>
+              <span class="pill subtle">Daily</span>
+            </div>
+            <form id="search-form" class="search">
+              <input
+                id="search"
+                placeholder="Search ticker, name or ISIN"
+                aria-label="Search instruments"
+              /><button class="quiet">Search</button>
+            </form>
+            <div id="instrument-list" class="instrument-list"></div>
+            <button id="more-instruments" class="quiet" hidden>
+              Load more instruments
+            </button>
+          </article>
+          <article class="panel chart-panel">
+            <div class="panel-top">
+              <div>
+                <p id="chart-market" class="eyebrow">SELECT AN INSTRUMENT</p>
+                <h2 id="chart-name">Market history</h2>
+              </div>
+              <span id="data-quality" class="pill subtle">No data</span>
+            </div>
+            <div class="price-row">
+              <strong id="last-price">—</strong
+              ><span id="chart-currency" class="muted"></span>
+            </div>
+            <svg
+              id="chart"
+              viewBox="0 0 700 190"
+              role="img"
+              aria-label="Daily closing prices"
+            >
+              <path id="chart-path" d=""></path>
+            </svg>
+            <div class="chart-labels">
+              <span id="chart-start">—</span><span id="chart-end">—</span>
+            </div>
+            <p id="price-source" class="footnote">
+              Prices retain their source, timestamp and quality status.
+            </p>
+          </article>
+        </section>
+        <section class="panel signal-panel">
+          <div>
+            <p class="eyebrow">EXPLAINABLE SIGNAL</p>
+            <h2 id="signal-title">Waiting for market evidence</h2>
+            <p id="signal-reason" class="muted">
+              Select an instrument to inspect price and volume behavior.
+            </p>
+          </div>
+          <div id="evidence" class="evidence"></div>
+          <p class="footnote">
+            “No anomaly detected” means these checks found no unusual pattern.
+            It does not mean a trade is safe.
+          </p>
+        </section>
+        <section id="portfolio" class="panel">
+          <div class="panel-top">
+            <div>
+              <p class="eyebrow">YOUR EXPOSURE</p>
+              <h2>Portfolio positions</h2>
+            </div>
+            <div class="inline">
+              <select id="portfolio-select" aria-label="Portfolio"></select
+              ><button id="save-snapshot" class="quiet">Save valuation</button>
+            </div>
+          </div>
+          <form id="portfolio-form" class="form-row">
+            <label
+              >Name<input
+                id="portfolio-name"
+                value="My portfolio"
+                required
+                maxlength="100" /></label
+            ><label
+              >Base currency<select id="base-currency">
+                <option>MAD</option>
+                <option>USD</option>
+                <option>EUR</option>
+              </select></label
+            ><button class="quiet">+ Create portfolio</button
+            ><button id="sample-portfolio" type="button" class="primary">
+              Load sample portfolio
+            </button>
+          </form>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Instrument</th>
+                  <th>Quantity</th>
+                  <th>Last close</th>
+                  <th>Value in base currency</th>
+                  <th>Allocation</th>
+                  <th>Data status</th>
+                </tr>
+              </thead>
+              <tbody id="positions"></tbody>
+            </table>
+          </div>
+          <p id="snapshot-status" class="footnote"></p>
+          <details>
+            <summary>Record a completed trade</summary>
+            <form id="trade-form" class="form-row">
+              <label
+                >Instrument<select
+                  id="trade-instrument"
+                  required
+                ></select></label
+              ><label
+                >Side<select id="trade-side">
+                  <option value="buy">Buy</option>
+                  <option value="sell">Sell</option>
+                </select></label
+              ><label
+                >Quantity<input
+                  id="trade-quantity"
+                  value="1"
+                  required
+                  inputmode="decimal" /></label
+              ><label
+                >Unit price<input
+                  id="trade-price"
+                  required
+                  inputmode="decimal" /></label
+              ><label
+                >Fees<input
+                  id="trade-fees"
+                  value="0"
+                  required
+                  inputmode="decimal" /></label
+              ><label
+                >Executed at<input
+                  id="trade-time"
+                  type="datetime-local"
+                  required /></label
+              ><button class="primary">Record trade</button>
+            </form>
+            <p class="footnote">
+              Records a historical trade; does not place an order. Demo
+              instruments remain labelled as synthetic.
+            </p>
+          </details>
+        </section>
+        <section id="paper" class="panel">
+          <div class="panel-top">
+            <div>
+              <p class="eyebrow">PRACTICE WITHOUT REAL MONEY</p>
+              <h2>Paper trading</h2>
+            </div>
+            <span class="pill">SIMULATED</span>
+          </div>
+          <p class="muted">
+            Separate accounts start with 100,000 simulated currency units. Fills
+            use the last completed daily close, with zero fees and slippage.
+          </p>
+          <form id="account-form" class="inline">
+            <label
+              >Account currency<select id="account-currency">
+                <option>MAD</option>
+                <option>USD</option>
+              </select></label
+            ><button class="quiet">Open / select paper account</button
+            ><strong id="paper-cash">No account selected</strong>
+          </form>
+          <form id="order-form" class="form-row">
+            <label
+              >Demo instrument<select
+                id="order-instrument"
+                required
+              ></select></label
+            ><label
+              >Side<select id="order-side">
+                <option value="buy">Buy</option>
+                <option value="sell">Sell</option>
+              </select></label
+            ><label
+              >Quantity<input
+                id="order-quantity"
+                required
+                value="1"
+                inputmode="decimal" /></label
+            ><button class="primary" id="order-submit">
+              Submit simulated order
+            </button>
+          </form>
+          <p id="order-reference" class="footnote">
+            Select an instrument to load its reference price.
+          </p>
+          <p id="order-result" role="status"></p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Submitted</th>
+                  <th>Instrument</th>
+                  <th>Side</th>
+                  <th>Quantity</th>
+                  <th>Fill price</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="orders"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+      <footer>
+        FinRisk Sentinel
+        <span>Data quality first. No automatic trade recommendations.</span>
+      </footer>
+    </main>
+  </body>
+</html>
