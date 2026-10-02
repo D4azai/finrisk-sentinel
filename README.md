@@ -1,8 +1,11 @@
 # FinRisk Sentinel
 
-FinRisk Sentinel detects unusual daily price/volume patterns and explains portfolio exposure for Moroccan and international equity workflows. The current implementation includes a durable Binance pipeline, authenticated workspaces, an equity catalog, a transaction ledger, persistent daily-market imports, FX-aware valuations, an explanatory anomaly baseline, a browser dashboard, and isolated paper trading. [External browser sign-in](docs/browser-sign-in.md) supports Authorization Code + PKCE and requires a configured identity provider. Live equity feeds and real broker execution still require external integrations. The built-in demo uses fictional data.
+FinRisk Sentinel detects unusual daily price/volume patterns and explains portfolio exposure for Moroccan and international equity workflows. The current implementation includes a durable Binance pipeline, authenticated team workspaces, expiring invitations and role management, versioned workspace plans with server-enforced quotas, an equity catalog, a transaction ledger with validated CSV imports, persistent daily-market imports, FX-aware valuations, a portfolio Risk Lab with tail-risk, drawdown, concentration, stress, and position-attribution evidence, saved watchlists with explainable alerts, a browser dashboard, and isolated paper trading. [External browser sign-in](docs/browser-sign-in.md) supports Authorization Code + PKCE and requires a configured identity provider. Live equity feeds, payment collection, and real broker execution still require external integrations. The built-in demo uses fictional data.
 
 See the [API foundation](docs/api-foundation.md), [portfolio ledger](docs/portfolio-ledger.md), and [instrument catalog](docs/instrument-catalog.md) for setup and endpoints. The catalog and provider boundary are implemented; live equity feeds still need provider access. The [target architecture](docs/architecture.md) describes the broader roadmap.
+
+The [account model](docs/account-model.md) documents registration identity, first-login provisioning, and tenant isolation. The [team workspace flow](docs/team-workspaces.md) documents invitations and roles, [portfolio Risk Lab](docs/portfolio-risk-lab.md) documents the analytics method and evidence contract, and [risk alerts](docs/risk-alerts.md) documents saved rules, scans, evidence, and acknowledgment. The [SaaS delivery plan](docs/product-delivery-plan.md) orders the remaining product, external API, professional web, native-compute, and production work.
+Current market-data, broker, and billing constraints are recorded in the [provider decision brief](docs/provider-integration-decisions.md).
 
 ## Current pipeline
 
@@ -27,9 +30,19 @@ docker compose -f docker-compose.yml -f compose.demo.yml up -d --build api
 docker compose -f docker-compose.yml -f compose.demo.yml run --rm --no-deps bootstrap python scripts/seed_demo_market.py
 ```
 
-Open http://localhost:8000 and choose a local demo identity. Real equity feeds and broker execution are not connected. The original pipeline commands below run the Binance data foundation.
+Open http://localhost:8000 and choose a local demo identity. The public site and authenticated trading workspace are built with Next.js 16, React 19, and Tailwind CSS 4; FastAPI serves the optimized static export on the same origin as the API. Real equity feeds and broker execution are not connected. The original pipeline commands below run the Binance data foundation.
 
 Requires Docker Desktop/Engine, Python 3.12.12, and uv 0.10.12.
+
+For frontend-only development, use Node 24:
+
+```sh
+cd apps/web
+npm install
+npm run dev
+```
+
+`npm run build` type-checks and exports the production frontend into `services/api/static`. The Docker build performs the same Next.js production build from the locked npm dependencies.
 
 ```sh
 uv sync --locked

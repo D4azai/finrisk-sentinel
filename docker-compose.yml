@@ -121,7 +121,8 @@ services:
       API_DATABASE_URL: ${API_DATABASE_URL:?Run scripts/init_api_env.py}
       API_OIDC_ISSUER: ${API_OIDC_ISSUER:-http://localhost:8081}
       API_OIDC_JWKS_URL: ${API_OIDC_JWKS_URL:-http://dev_identity:8080/jwks}
-      API_OIDC_AUDIENCE: finrisk-api
+      API_OIDC_AUDIENCE: ${API_OIDC_AUDIENCE:-finrisk-api}
+      API_REQUIRED_SCOPE: ${API_REQUIRED_SCOPE:-finrisk:access}
       API_ALLOW_DEMO_MARKET_DATA: ${API_ALLOW_DEMO_MARKET_DATA:-false}
       API_ENABLE_PAPER_TRADING: ${API_ENABLE_PAPER_TRADING:-false}
       API_ENABLE_DEV_LOGIN: ${API_ENABLE_DEV_LOGIN:-false}

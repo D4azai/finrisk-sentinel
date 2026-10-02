@@ -12,10 +12,14 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from services.api.analytics import register_analytics
 from services.api.auth import TokenVerifier, unauthorized
+from services.api.billing import register_billing, require_quota
 from services.api.database import audit, open_pool, transaction
+from services.api.imports import register_imports
 from services.api.instruments import register_instruments
 from services.api.ledger import register_ledger, require_portfolio
 from services.api.models import (
+    OnboardingCreate,
+    OnboardingView,
     PortfolioCreate,
     PortfolioPage,
     PortfolioUpdate,
@@ -25,7 +29,10 @@ from services.api.models import (
     WorkspaceView,
 )
 from services.api.paper import register_paper
+from services.api.portfolio_risk import register_portfolio_risk
+from services.api.risk import register_risk
 from services.api.settings import APISettings
+from services.api.team import register_team
 from services.api.web import register_web
 from services.instruments.providers import DemoQuoteProvider
 
@@ -50,13 +57,18 @@ def require_write(role, *, delete=False):
 class BodyLimit:
     """Bound JSON bodies before buffering, including streamed/chunked requests."""
 
-    def __init__(self, app, limit=16384):
-        self.app, self.limit = app, limit
+    def __init__(self, app, limit=16384, import_limit=700000):
+        self.app, self.limit, self.import_limit = app, limit, import_limit
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http" or scope["method"] not in {"POST", "PATCH", "PUT"}:
             return await self.app(scope, receive, send)
         data = bytearray()
+        limit = (
+            self.import_limit
+            if scope.get("path", "").endswith("/transaction-imports/preview")
+            else self.limit
+        )
         try:
             async with asyncio.timeout(10):
                 while True:
@@ -64,7 +76,7 @@ class BodyLimit:
                     if message["type"] == "http.disconnect":
                         return
                     data.extend(message.get("body", b""))
-                    if len(data) > self.limit:
+                    if len(data) > limit:
                         response = JSONResponse(
                             {"detail": "Request body too large"}, status_code=413
                         )
@@ -141,6 +153,38 @@ def create_app(settings=None, *, pool=None, verifier=None):
         async with transaction(request.app.state.pool, identity) as (_, user, _role):
             return {"id": user}
 
+    @app.post("/v1/onboarding", status_code=201, response_model=OnboardingView)
+    async def onboard(body: OnboardingCreate, request: Request, identity=Depends(authenticated)):
+        """Create the first workspace and portfolio as one database transaction."""
+        async with transaction(request.app.state.pool, identity) as (connection, user, _role):
+            already_onboarded = await connection.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM saas.memberships WHERE user_id=$1)", user
+            )
+            if already_onboarded:
+                raise HTTPException(409, "Account already has a workspace")
+
+            tenant = await connection.fetchval(
+                "SELECT saas.create_workspace($1)", body.workspace_name
+            )
+            await connection.execute("SELECT set_config('app.tenant_id',$1,true)", str(tenant))
+            workspace_row = await connection.fetchrow(
+                "SELECT id,name,created_at,'owner' AS role FROM saas.workspaces WHERE id=$1",
+                tenant,
+            )
+            await require_quota(connection, tenant, "portfolios")
+            portfolio_row = await connection.fetchrow(
+                """INSERT INTO saas.portfolios(tenant_id,id,name,base_currency,created_by)
+                   VALUES($1,$2,$3,$4,$5) RETURNING *""",
+                tenant,
+                uuid4(),
+                body.portfolio_name,
+                body.base_currency,
+                user,
+            )
+            await audit(connection, tenant, user, "workspace.created", tenant)
+            await audit(connection, tenant, user, "portfolio.created", portfolio_row["id"])
+            return {"workspace": dict(workspace_row), "portfolio": dict(portfolio_row)}
+
     @app.post("/v1/workspaces", status_code=201, response_model=WorkspaceView)
     async def create_workspace(
         body: WorkspaceCreate, request: Request, identity=Depends(authenticated)
@@ -203,6 +247,7 @@ def create_app(settings=None, *, pool=None, verifier=None):
             role,
         ):
             require_write(role)
+            await require_quota(connection, tenant_id, "portfolios")
             row = await connection.fetchrow(
                 """INSERT INTO saas.portfolios(tenant_id,id,name,base_currency,created_by)
                    VALUES($1,$2,$3,$4,$5) RETURNING *""",
@@ -316,6 +361,13 @@ def create_app(settings=None, *, pool=None, verifier=None):
                 portfolio_id,
             ):
                 raise HTTPException(409, "Portfolios with saved valuations cannot be deleted")
+            if await connection.fetchval(
+                """SELECT 1 FROM saas.portfolio_risk_snapshots
+                WHERE tenant_id=$1 AND portfolio_id=$2 LIMIT 1""",
+                tenant_id,
+                portfolio_id,
+            ):
+                raise HTTPException(409, "Portfolios with saved risk analyses cannot be deleted")
             deleted = await connection.fetchval(
                 "DELETE FROM saas.portfolios WHERE tenant_id=$1 AND id=$2 RETURNING id",
                 tenant_id,
@@ -327,9 +379,14 @@ def create_app(settings=None, *, pool=None, verifier=None):
         return Response(status_code=204)
 
     register_ledger(app, authenticated, require_write)
+    register_imports(app, authenticated, require_write)
     register_instruments(app, authenticated)
     register_analytics(app, authenticated, require_write)
+    register_portfolio_risk(app, authenticated, require_write)
     register_paper(app, authenticated, require_write)
+    register_risk(app, authenticated, require_write)
+    register_team(app, authenticated)
+    register_billing(app, authenticated)
     register_web(app)
     return app
 

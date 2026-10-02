@@ -22,6 +22,77 @@ async def require_portfolio(connection, tenant, portfolio, *, lock=False):
         raise HTTPException(404, "Portfolio not found")
 
 
+async def record_transaction(connection, tenant, portfolio, user, body, *, portfolio_locked=False):
+    if not portfolio_locked:
+        await require_portfolio(connection, tenant, portfolio, lock=True)
+    previous = await connection.fetchrow(
+        """SELECT * FROM saas.portfolio_transactions
+           WHERE tenant_id=$1 AND portfolio_id=$2 AND client_request_id=$3""",
+        tenant,
+        portfolio,
+        body.client_request_id,
+    )
+    if previous:
+        if any(previous[key] != value for key, value in body.model_dump().items()):
+            raise HTTPException(409, "Request ID already used for a different transaction")
+        return dict(previous), False
+    listing = await connection.fetchrow(
+        "SELECT id,is_demo FROM saas.instruments WHERE market=$1 AND symbol=$2 AND currency=$3",
+        body.market,
+        body.symbol,
+        body.currency,
+    )
+    if listing is None:
+        raise HTTPException(
+            409, "Listing not in the available catalog; check exchange, ticker and currency"
+        )
+    state = await connection.fetchrow(
+        """SELECT max(executed_at) AS latest, min(currency) AS currency,
+           coalesce(sum(CASE WHEN side='buy' THEN quantity ELSE -quantity END),0) AS quantity
+           FROM saas.portfolio_transactions
+           WHERE tenant_id=$1 AND portfolio_id=$2 AND market=$3 AND symbol=$4""",
+        tenant,
+        portfolio,
+        body.market,
+        body.symbol,
+    )
+    if state["currency"] and state["currency"] != body.currency:
+        raise HTTPException(409, "Instrument currency differs from its recorded history")
+    if state["latest"] and body.executed_at < state["latest"]:
+        raise HTTPException(409, "Record trades in execution order for each instrument")
+    if body.side == "sell" and body.quantity > state["quantity"]:
+        raise HTTPException(409, "Insufficient recorded holdings")
+    row = await connection.fetchrow(
+        """INSERT INTO saas.portfolio_transactions
+           (tenant_id,portfolio_id,id,client_request_id,market,symbol,currency,
+            side,quantity,price,fees,executed_at,created_by,instrument_id,is_demo)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *""",
+        tenant,
+        portfolio,
+        uuid4(),
+        body.client_request_id,
+        body.market,
+        body.symbol,
+        body.currency,
+        body.side,
+        body.quantity,
+        body.price,
+        body.fees,
+        body.executed_at,
+        user,
+        listing["id"],
+        listing["is_demo"],
+    )
+    await connection.execute(
+        """UPDATE saas.portfolios SET version=version+1,updated_at=now()
+           WHERE tenant_id=$1 AND id=$2""",
+        tenant,
+        portfolio,
+    )
+    await audit(connection, tenant, user, "portfolio.transaction_recorded", row["id"])
+    return dict(row), True
+
+
 def register_ledger(app, authenticated, require_write):
     root = "/v1/workspaces/{tenant_id}/portfolios/{portfolio_id}"
 
@@ -41,75 +112,10 @@ def register_ledger(app, authenticated, require_write):
             allow_demo_market_data=request.app.state.settings.allow_demo_market_data,
         ) as (conn, user, role):
             require_write(role)
-            # Serialize holdings checks, retries, and deletes for this portfolio.
-            await require_portfolio(conn, tenant_id, portfolio_id, lock=True)
-            previous = await conn.fetchrow(
-                """SELECT * FROM saas.portfolio_transactions
-                   WHERE tenant_id=$1 AND portfolio_id=$2 AND client_request_id=$3""",
-                tenant_id,
-                portfolio_id,
-                body.client_request_id,
-            )
-            if previous:
-                if any(previous[key] != value for key, value in body.model_dump().items()):
-                    raise HTTPException(409, "Request ID already used for a different transaction")
+            row, created = await record_transaction(conn, tenant_id, portfolio_id, user, body)
+            if not created:
                 response.status_code = 200
-                return dict(previous)
-            listing = await conn.fetchrow(
-                "SELECT id,is_demo FROM saas.instruments WHERE market=$1 AND symbol=$2 AND currency=$3",
-                body.market,
-                body.symbol,
-                body.currency,
-            )
-            if listing is None:
-                raise HTTPException(
-                    409, "Listing not in the available catalog; check exchange, ticker and currency"
-                )
-            state = await conn.fetchrow(
-                """SELECT max(executed_at) AS latest, min(currency) AS currency,
-                   coalesce(sum(CASE WHEN side='buy' THEN quantity ELSE -quantity END),0) AS quantity
-                   FROM saas.portfolio_transactions
-                   WHERE tenant_id=$1 AND portfolio_id=$2 AND market=$3 AND symbol=$4""",
-                tenant_id,
-                portfolio_id,
-                body.market,
-                body.symbol,
-            )
-            if state["currency"] and state["currency"] != body.currency:
-                raise HTTPException(409, "Instrument currency differs from its recorded history")
-            if state["latest"] and body.executed_at < state["latest"]:
-                raise HTTPException(409, "Record trades in execution order for each instrument")
-            if body.side == "sell" and body.quantity > state["quantity"]:
-                raise HTTPException(409, "Insufficient recorded holdings")
-            row = await conn.fetchrow(
-                """INSERT INTO saas.portfolio_transactions
-                   (tenant_id,portfolio_id,id,client_request_id,market,symbol,currency,
-                    side,quantity,price,fees,executed_at,created_by,instrument_id,is_demo)
-                   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *""",
-                tenant_id,
-                portfolio_id,
-                uuid4(),
-                body.client_request_id,
-                body.market,
-                body.symbol,
-                body.currency,
-                body.side,
-                body.quantity,
-                body.price,
-                body.fees,
-                body.executed_at,
-                user,
-                listing["id"],
-                listing["is_demo"],
-            )
-            await conn.execute(
-                """UPDATE saas.portfolios SET version=version+1,updated_at=now()
-                   WHERE tenant_id=$1 AND id=$2""",
-                tenant_id,
-                portfolio_id,
-            )
-            await audit(conn, tenant_id, user, "portfolio.transaction_recorded", row["id"])
-            return dict(row)
+            return row
 
     @app.get(root + "/transactions", response_model=TransactionPage)
     async def list_trades(

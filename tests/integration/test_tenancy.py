@@ -51,6 +51,21 @@ async def tenant_app():
         await admin.execute(
             files("services.common").joinpath("migrations/007_paper_trading.sql").read_text()
         )
+        await admin.execute(
+            files("services.common").joinpath("migrations/008_team_memberships.sql").read_text()
+        )
+        await admin.execute(
+            files("services.common").joinpath("migrations/009_portfolio_imports.sql").read_text()
+        )
+        await admin.execute(
+            files("services.common").joinpath("migrations/010_risk_alerts.sql").read_text()
+        )
+        await admin.execute(
+            files("services.common").joinpath("migrations/011_billing_entitlements.sql").read_text()
+        )
+        await admin.execute(
+            files("services.common").joinpath("migrations/012_portfolio_risk_lab.sql").read_text()
+        )
         # Synthetic reference records are confined to this disposable test database.
         for market, currency in [("XCAS", "MAD"), ("XNYS", "USD")]:
             await admin.execute(
@@ -126,6 +141,167 @@ async def portfolio(client, headers, user, tenant):
     )
     assert response.status_code == 201, response.text
     return response.json()["id"]
+
+
+async def test_first_run_onboarding_is_atomic_and_single_use(tenant_app):
+    client, headers, _pool, admin, _config = tenant_app
+    response = await client.post(
+        "/v1/onboarding",
+        headers=headers("new-account"),
+        json={
+            "workspace_name": "Personal workspace",
+            "portfolio_name": "Long-term portfolio",
+            "base_currency": "MAD",
+        },
+    )
+    assert response.status_code == 201, response.text
+    created = response.json()
+    assert created["workspace"]["name"] == "Personal workspace"
+    assert created["workspace"]["role"] == "owner"
+    assert created["portfolio"]["tenant_id"] == created["workspace"]["id"]
+    assert created["portfolio"]["base_currency"] == "MAD"
+
+    retry = await client.post(
+        "/v1/onboarding",
+        headers=headers("new-account"),
+        json={
+            "workspace_name": "Duplicate",
+            "portfolio_name": "Duplicate",
+            "base_currency": "USD",
+        },
+    )
+    assert retry.status_code == 409
+
+    counts = await admin.fetchrow(
+        """SELECT
+             (SELECT count(*) FROM saas.workspaces w JOIN saas.memberships m
+                ON m.tenant_id=w.id JOIN saas.users u ON u.id=m.user_id
+                WHERE u.subject='new-account') AS workspaces,
+             (SELECT count(*) FROM saas.portfolios p JOIN saas.memberships m
+                ON m.tenant_id=p.tenant_id JOIN saas.users u ON u.id=m.user_id
+                WHERE u.subject='new-account') AS portfolios"""
+    )
+    assert dict(counts) == {"workspaces": 1, "portfolios": 1}
+
+
+async def test_subscription_projection_and_concurrent_portfolio_quota(tenant_app):
+    client, headers, _pool, admin, _config = tenant_app
+    tenant = await workspace(client, headers, "quota-owner")
+    await admin.execute(
+        """UPDATE saas.plan_versions
+           SET entitlements=jsonb_set(entitlements,'{portfolios}','1'::jsonb)
+           WHERE plan_code='free' AND version=1"""
+    )
+
+    status = await client.get(
+        f"/v1/workspaces/{tenant}/subscription", headers=headers("quota-owner")
+    )
+    assert status.status_code == 200, status.text
+    assert status.json()["plan"]["code"] == "free"
+    assert status.json()["plan"]["entitlements"]["portfolios"] == 1
+    assert status.json()["usage"]["portfolios"] == 0
+
+    async def create(name):
+        return await client.post(
+            f"/v1/workspaces/{tenant}/portfolios",
+            headers=headers("quota-owner"),
+            json={"name": name, "base_currency": "MAD"},
+        )
+
+    first, second = await asyncio.gather(create("One"), create("Two"))
+    assert sorted([first.status_code, second.status_code]) == [201, 403]
+    rejected = first if first.status_code == 403 else second
+    assert rejected.json()["detail"] == "Plan limit reached for portfolios (1/1)"
+
+    hidden = await client.get(
+        f"/v1/workspaces/{tenant}/subscription", headers=headers("other-account")
+    )
+    assert hidden.status_code == 404
+
+
+async def invite(client, headers, owner, tenant, role="member"):
+    response = await client.post(
+        f"/v1/workspaces/{tenant}/invitations",
+        headers=headers(owner),
+        json={"role": role, "expires_in_hours": 24},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+async def test_team_invitation_role_change_and_removal(tenant_app):
+    client, headers, _pool, _admin, _config = tenant_app
+    tenant = await workspace(client, headers, "alice")
+    invitation = await invite(client, headers, "alice", tenant)
+    assert invitation["status"] == "pending"
+    assert len(invitation["token"]) >= 32
+
+    accepted = await client.post(
+        "/v1/invitations/accept",
+        headers=headers("bob"),
+        json={"token": invitation["token"]},
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json() == {"workspace_id": tenant, "role": "member"}
+    # Retrying the same acceptance is safe and returns the existing membership.
+    retried = await client.post(
+        "/v1/invitations/accept",
+        headers=headers("bob"),
+        json={"token": invitation["token"]},
+    )
+    assert retried.status_code == 200
+
+    members = (
+        await client.get(f"/v1/workspaces/{tenant}/members", headers=headers("alice"))
+    ).json()
+    assert [item["role"] for item in members] == ["owner", "member"]
+    bob_id = next(item["user_id"] for item in members if item["role"] == "member")
+    changed = await client.patch(
+        f"/v1/workspaces/{tenant}/members/{bob_id}",
+        headers=headers("alice"),
+        json={"role": "viewer"},
+    )
+    assert changed.status_code == 200 and changed.json()["role"] == "viewer"
+    assert (
+        await client.post(
+            f"/v1/workspaces/{tenant}/portfolios",
+            headers=headers("bob"),
+            json={"name": "Forbidden"},
+        )
+    ).status_code == 403
+
+    assert (
+        await client.delete(
+            f"/v1/workspaces/{tenant}/members/{members[0]['user_id']}",
+            headers=headers("alice"),
+        )
+    ).status_code == 403
+    removed = await client.delete(
+        f"/v1/workspaces/{tenant}/members/{bob_id}", headers=headers("alice")
+    )
+    assert removed.status_code == 204
+    assert (await client.get(f"/v1/workspaces/{tenant}", headers=headers("bob"))).status_code == 404
+
+
+async def test_invitation_listing_hides_secret_and_revocation_blocks_acceptance(tenant_app):
+    client, headers, _pool, _admin, _config = tenant_app
+    tenant = await workspace(client, headers, "alice")
+    invitation = await invite(client, headers, "alice", tenant, "viewer")
+    listed = await client.get(f"/v1/workspaces/{tenant}/invitations", headers=headers("alice"))
+    assert listed.status_code == 200
+    assert listed.json()[0]["status"] == "pending"
+    assert "token" not in listed.json()[0]
+    revoked = await client.delete(
+        f"/v1/workspaces/{tenant}/invitations/{invitation['id']}",
+        headers=headers("alice"),
+    )
+    assert revoked.status_code == 204
+    rejected = await client.post(
+        "/v1/invitations/accept",
+        headers=headers("bob"),
+        json={"token": invitation["token"]},
+    )
+    assert rejected.status_code == 404
 
 
 async def test_two_users_cannot_cross_read_write_or_delete(tenant_app):
@@ -338,6 +514,82 @@ async def test_ledger_precision_retries_and_history_protection(tenant_app):
         )
     ).json()
     assert len(other["items"]) == 1 and other["items"][0]["id"] != page["items"][0]["id"]
+
+
+async def test_portfolio_csv_preview_commit_history_and_idempotency(tenant_app):
+    from decimal import Decimal
+
+    client, headers, _pool, admin, _config = tenant_app
+    tenant = await workspace(client, headers, "alice")
+    item = await portfolio(client, headers, "alice", tenant)
+    root = f"/v1/workspaces/{tenant}/portfolios/{item}/transaction-imports"
+    request_id = str(uuid4())
+    csv_text = (
+        "market,symbol,currency,side,quantity,price,fees,executed_at\n"
+        "XCAS,TEST,MAD,buy,10,100,2,2026-02-01T10:00:00Z\n"
+        "XCAS,TEST,MAD,sell,3,110,1,2026-02-02T10:00:00Z\n"
+    )
+    payload = {"client_request_id": request_id, "filename": "trades.csv", "csv_text": csv_text}
+    preview = await client.post(root + "/preview", headers=headers("alice"), json=payload)
+    assert preview.status_code == 201, preview.text
+    body = preview.json()
+    assert (body["row_count"], body["valid_count"], body["error_count"]) == (2, 2, 0)
+    assert all(not row["errors"] for row in body["rows"])
+    retried = await client.post(root + "/preview", headers=headers("alice"), json=payload)
+    assert retried.status_code == 201 and retried.json()["id"] == body["id"]
+    conflict = await client.post(
+        root + "/preview",
+        headers=headers("alice"),
+        json={**payload, "csv_text": csv_text.replace("110", "120")},
+    )
+    assert conflict.status_code == 409
+
+    committed = await client.post(f"{root}/{body['id']}/commit", headers=headers("alice"), json={})
+    assert committed.status_code == 200, committed.text
+    assert committed.json()["imported_count"] == 2
+    repeated = await client.post(f"{root}/{body['id']}/commit", headers=headers("alice"), json={})
+    assert repeated.status_code == 200 and repeated.json()["status"] == "committed"
+    holdings = (
+        await client.get(
+            f"/v1/workspaces/{tenant}/portfolios/{item}/holdings", headers=headers("alice")
+        )
+    ).json()["items"]
+    assert Decimal(holdings[0]["quantity"]) == Decimal("7")
+    history = await client.get(root, headers=headers("alice"))
+    assert history.status_code == 200 and history.json()[0]["status"] == "committed"
+    assert (
+        await admin.fetchval(
+            "SELECT count(*) FROM saas.audit_events WHERE action='portfolio.import_committed'"
+        )
+        == 1
+    )
+
+
+async def test_portfolio_csv_errors_are_durable_and_tenant_isolated(tenant_app):
+    client, headers, _pool, _admin, _config = tenant_app
+    tenant = await workspace(client, headers, "alice")
+    item = await portfolio(client, headers, "alice", tenant)
+    await workspace(client, headers, "bob")
+    root = f"/v1/workspaces/{tenant}/portfolios/{item}/transaction-imports"
+    csv_text = (
+        "market,symbol,currency,side,quantity,price,executed_at\n"
+        "XCAS,UNKNOWN,MAD,buy,1,100,2026-02-01T10:00:00Z\n"
+        "XCAS,TEST,MAD,sell,5,100,2026-02-02T10:00:00Z\n"
+    )
+    preview = await client.post(
+        root + "/preview",
+        headers=headers("alice"),
+        json={"client_request_id": str(uuid4()), "csv_text": csv_text},
+    )
+    assert preview.status_code == 201, preview.text
+    body = preview.json()
+    assert body["error_count"] == 2
+    assert "catalog" in body["rows"][0]["errors"][0]
+    assert "holdings" in body["rows"][1]["errors"][0]
+    assert (
+        await client.post(f"{root}/{body['id']}/commit", headers=headers("alice"), json={})
+    ).status_code == 409
+    assert (await client.get(root, headers=headers("bob"))).status_code == 404
 
 
 async def test_ledger_concurrent_sales_and_duplicate_requests(tenant_app):
@@ -725,6 +977,50 @@ async def test_stored_history_signal_and_reproducible_fx_valuation(tenant_app):
     ).json() == saved.json()
 
 
+async def test_portfolio_risk_lab_reports_limits_and_saves_evidence(tenant_app):
+    client, headers, _pool, _admin, _config = tenant_app
+    tenant, item, instrument, bar = await prepare_analytics(tenant_app)
+    root = f"/v1/workspaces/{tenant}/portfolios/{item}"
+    response = await client.post(
+        root + "/transactions",
+        headers=headers("alice"),
+        json=trade(
+            symbol="DEMO-MA",
+            quantity="10",
+            price=str(bar["close"]),
+            executed_at=bar["as_of"].isoformat(),
+        ),
+    )
+    assert response.status_code == 201, response.text
+    response = await client.get(
+        root + "/risk-lab?lookback=90&confidence=0.95", headers=headers("alice")
+    )
+    assert response.status_code == 200, response.text
+    risk = response.json()
+    assert risk["status"] == "limited"
+    assert risk["metrics"]["observation_count"] >= 30
+    assert risk["metrics"]["expected_shortfall_pct"] >= risk["metrics"]["value_at_risk_pct"]
+    assert risk["concentration"]["effective_holdings"] == "1.000000"
+    assert len(risk["scenarios"]) == 4
+    assert len(risk["data_fingerprint"]) == 64
+    assert any("FX returns" in limitation for limitation in risk["limitations"])
+    saved = await client.post(
+        root + "/risk-lab/snapshots",
+        headers=headers("alice"),
+        json={"confidence": "0.95", "lookback": 90},
+    )
+    assert saved.status_code == 201, saved.text
+    snapshot_id = saved.json()["snapshot_id"]
+    assert (
+        await client.get(
+            root + f"/risk-lab/snapshots/{snapshot_id}", headers=headers("alice")
+        )
+    ).json() == saved.json()
+    assert (
+        await client.get(root + f"/risk-lab/snapshots/{snapshot_id}", headers=headers("bob"))
+    ).status_code == 404
+
+
 async def test_gaps_staleness_and_calendar_uncertainty_withhold_signals(tenant_app):
     client, headers, pool, admin, config = tenant_app
     tenant, item, instrument, bar = await prepare_analytics(tenant_app)
@@ -896,6 +1192,120 @@ async def test_dashboard_static_security_and_dev_login_default_off(tenant_app):
     client, headers, pool, admin, config = tenant_app
     response = await client.get("/")
     assert response.status_code == 200 and "FinRisk Sentinel" in response.text
-    assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
-    assert (await client.get("/assets/app.js")).status_code == 200
+    policy = response.headers["content-security-policy"]
+    assert "frame-ancestors 'none'" in policy
+    assert "'unsafe-inline'" not in policy
+    assert "'sha256-" in policy
+    assert (await client.get("/app-runtime.js")).status_code == 200
+    assert (await client.get("/app-bootstrap.js")).status_code == 200
     assert (await client.post("/v1/dev-login", json={"user": "alice"})).status_code == 404
+
+
+async def test_watchlist_risk_scan_alert_deduplication_and_access(tenant_app):
+    client, headers, pool, admin, config = tenant_app
+    config.allow_demo_market_data = True
+    await seed_demo(admin, environment="test")
+    tenant = await workspace(client, headers, "alice")
+    spike = await admin.fetchval("SELECT id FROM saas.instruments WHERE symbol='DEMO-SPIKE'")
+    root = f"/v1/workspaces/{tenant}"
+
+    added = await client.post(
+        root + "/watchlist",
+        headers=headers("alice"),
+        json={"instrument_id": str(spike), "alerts_enabled": True},
+    )
+    assert added.status_code == 201, added.text
+    assert added.json()["symbol"] == "DEMO-SPIKE"
+    assert (
+        await client.post(
+            root + "/watchlist",
+            headers=headers("alice"),
+            json={"instrument_id": str(spike), "alerts_enabled": True},
+        )
+    ).status_code == 409
+    assert len((await client.get(root + "/watchlist", headers=headers("alice"))).json()) == 1
+
+    request_id = str(uuid4())
+    concurrent = await asyncio.gather(
+        *[
+            client.post(
+                root + "/risk-scans",
+                headers=headers("alice"),
+                json={"client_request_id": request_id},
+            )
+            for _ in range(2)
+        ]
+    )
+    assert all(response.status_code == 200 for response in concurrent)
+    assert concurrent[0].json()["id"] == concurrent[1].json()["id"]
+    first = concurrent[0]
+    assert first.status_code == 200, first.text
+    assert first.json()["evaluated_count"] == 1
+    assert first.json()["elevated_count"] == first.json()["new_alert_count"] == 1
+    second = await client.post(
+        root + "/risk-scans",
+        headers=headers("alice"),
+        json={"client_request_id": str(uuid4())},
+    )
+    assert second.status_code == 200 and second.json()["new_alert_count"] == 0
+
+    alerts = (await client.get(root + "/alerts?status=open", headers=headers("alice"))).json()
+    assert len(alerts) == 1
+    assert alerts[0]["evidence"]["status"] == "elevated"
+    alert_id = alerts[0]["id"]
+
+    bob = (await client.get("/v1/me", headers=headers("bob"))).json()["id"]
+    await admin.execute(
+        "INSERT INTO saas.memberships VALUES($1,$2,'viewer',now())", UUID(tenant), UUID(bob)
+    )
+    assert len((await client.get(root + "/alerts", headers=headers("bob"))).json()) == 1
+    assert (
+        await client.post(
+            root + "/risk-scans",
+            headers=headers("bob"),
+            json={"client_request_id": str(uuid4())},
+        )
+    ).status_code == 403
+    assert (
+        await client.post(root + f"/alerts/{alert_id}/acknowledge", headers=headers("bob"))
+    ).status_code == 403
+
+    acknowledged = await client.post(
+        root + f"/alerts/{alert_id}/acknowledge", headers=headers("alice")
+    )
+    assert acknowledged.status_code == 200
+    assert acknowledged.json()["status"] == "acknowledged"
+    repeated = await client.post(root + f"/alerts/{alert_id}/acknowledge", headers=headers("alice"))
+    assert repeated.status_code == 200 and repeated.json()["status"] == "acknowledged"
+    assert (
+        await admin.fetchval(
+            "SELECT count(*) FROM saas.audit_events WHERE action='risk.alert_acknowledged'"
+        )
+        == 1
+    )
+    assert (await client.get(root + "/alerts?status=open", headers=headers("alice"))).json() == []
+    assert (
+        len(
+            (
+                await client.get(root + "/alerts?status=acknowledged", headers=headers("alice"))
+            ).json()
+        )
+        == 1
+    )
+
+    disabled = await client.patch(
+        root + f"/watchlist/{spike}",
+        headers=headers("alice"),
+        json={"alerts_enabled": False},
+    )
+    assert disabled.status_code == 200 and not disabled.json()["alerts_enabled"]
+    empty_scan = await client.post(
+        root + "/risk-scans",
+        headers=headers("alice"),
+        json={"client_request_id": str(uuid4())},
+    )
+    assert empty_scan.status_code == 200 and empty_scan.json()["evaluated_count"] == 0
+    assert (
+        await client.delete(root + f"/watchlist/{spike}", headers=headers("alice"))
+    ).status_code == 204
+    assert (await client.get(root + "/watchlist", headers=headers("alice"))).json() == []

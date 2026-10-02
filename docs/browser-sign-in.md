@@ -6,6 +6,8 @@ FinRisk supports a public OpenID Connect client using Authorization Code with PK
 
 Register a **public client** (no client secret) with Authorization Code and mandatory PKCE S256. Register the exact application callback, for example `https://finrisk.example/auth/callback`. Configure the provider to issue RS256-signed JWT access tokens for the existing `API_OIDC_AUDIENCE`, with the existing `API_REQUIRED_SCOPE` (default `finrisk:access`), and ID tokens for the browser client. Both tokens must identify the same issuer and subject. Opaque access tokens and providers requiring confidential-client credentials are not supported by this integration.
 
+The API validates the token's issued-at and expiry timestamps. Production hosts and developer machines must synchronize their clocks through the operating system's time service. If every issuer, audience, signature algorithm, and scope check matches but a newly issued token is rejected, compare the host and container UTC time with a trusted network clock before changing token validation policy.
+
 Set these deployment variables together:
 
 ```dotenv

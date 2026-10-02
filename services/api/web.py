@@ -1,3 +1,6 @@
+import base64
+import hashlib
+import re
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urljoin, urlsplit
@@ -27,19 +30,50 @@ class CallbackPrivacy:
         await self.app(scope, receive, send)
 
 
+def _frontend_content_security_policy(page: Path) -> str:
+    """Allow only the exact inline bootstrap payloads emitted by Next's static export."""
+    markup = page.read_text(encoding="utf-8")
+    hashes = []
+    for match in re.finditer(r"<script(?P<attrs>[^>]*)>(?P<body>.*?)</script>", markup, re.DOTALL):
+        if re.search(r"\bsrc\s*=", match.group("attrs"), re.IGNORECASE):
+            continue
+        digest = hashlib.sha256(match.group("body").encode()).digest()
+        hashes.append(f"'sha256-{base64.b64encode(digest).decode()}'")
+    scripts = " ".join(["'self'", *hashes])
+    return (
+        f"default-src 'self'; script-src {scripts}; style-src 'self'; "
+        "connect-src 'self'; img-src 'self' data:; object-src 'none'; "
+        "base-uri 'none'; frame-ancestors 'none'"
+    )
+
+
 def register_web(app):
     app.add_middleware(CallbackPrivacy)
     register_browser_auth(app)
     directory = Path(__file__).parent / "static"
-    app.mount("/assets", StaticFiles(directory=directory), name="assets")
+    index_page = directory / "index.html"
+    content_security_policy = _frontend_content_security_policy(index_page)
+    app.mount("/_next", StaticFiles(directory=directory / "_next"), name="next-assets")
+
+    @app.get("/browser-auth.js", include_in_schema=False)
+    async def browser_auth_script():
+        return FileResponse(directory / "browser-auth.js", media_type="text/javascript")
+
+    @app.get("/app-runtime.js", include_in_schema=False)
+    async def app_runtime_script():
+        return FileResponse(directory / "app-runtime.js", media_type="text/javascript")
+
+    @app.get("/app-bootstrap.js", include_in_schema=False)
+    async def app_bootstrap_script():
+        return FileResponse(directory / "app-bootstrap.js", media_type="text/javascript")
 
     @app.get("/", include_in_schema=False)
     @app.get("/auth/callback", include_in_schema=False)
     async def dashboard():
         return FileResponse(
-            directory / "index.html",
+            index_page,
             headers={
-                "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+                "Content-Security-Policy": content_security_policy,
                 "Referrer-Policy": "no-referrer",
             },
         )

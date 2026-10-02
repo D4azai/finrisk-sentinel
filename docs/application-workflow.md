@@ -1,6 +1,6 @@
 # Daily market analysis and the local trading demo
 
-The application now joins instrument discovery, persistent daily market history, portfolio valuations, explanatory anomaly detection, a browser dashboard, and isolated paper trading. Live exchange feeds and real broker execution remain unconnected because no provider credentials or broker integration details have been supplied.
+The application now joins instrument discovery, persistent daily market history, portfolio valuations, explanatory anomaly detection, saved watchlists and alerts, a browser dashboard, and isolated paper trading. Live exchange feeds and real broker execution remain unconnected because no provider credentials or broker integration details have been supplied.
 
 ## Run the complete local demo
 
@@ -55,11 +55,23 @@ The modified z-score uses `0.6745 × (latest return − median return) / MAD`, w
 
 Results are **elevated**, **no_anomaly_detected**, or **insufficient_data**. Short/unadjusted history, stale prices, gaps, or uncertain calendars withhold the signal. No “safe to trade” guarantee is emitted. Current tests validate fixtures and mathematical behavior, not predictive accuracy on real markets. Production use needs licensed historical data, corporate-action review, walk-forward evaluation, false-alert analysis and exchange-specific calibration. There is no automatic order placement from a signal.
 
-## 5. Dashboard
+## 5. Watchlists and risk alerts
 
-The responsive dashboard is served by the API at `/`, with same-origin static assets, a restrictive Content Security Policy and no third-party scripts. It supports workspace/portfolio creation, catalog search, daily-price charts, signal explanations, exact-value API-backed valuation tables, saved snapshots, completed-trade entry, and simulated order history. Chart/number formatting uses browser numbers for display only; all monetary calculations and stored values remain server-side decimals. Data is loaded on navigation or explicit Refresh; this is not a realtime streaming dashboard.
+Workspace members can save up to 100 catalog instruments and enable or pause one `daily_anomaly` rule per instrument. `POST /v1/workspaces/{tenant}/risk-scans` accepts a client request UUID, evaluates enabled rules at one recorded evaluation time, and stores its status, counts, model results, requester, and timestamps. Reusing a request UUID returns the original run, including for concurrent retries.
 
-## 6. Paper trading and the live boundary
+Elevated signals create durable alerts containing the model version, parameters, reasons, numeric statistics, and source bar IDs. The deduplication key combines the rule, model version, and latest evaluated bar, so rescanning unchanged evidence does not create another alert. Members can acknowledge alerts; viewers can inspect rules, scan history, and evidence but cannot change state. Forced row-level security applies to all four tables. The synchronous scan is bounded to 100 rules. A production delivery phase still needs a worker queue, retry policy, notification outbox, and missed-delivery recovery.
+
+See [risk-alerts.md](risk-alerts.md) for endpoints and invariants.
+
+## 6. Next.js trading workspace
+
+The responsive website is a Next.js 16 and React 19 application styled with Tailwind CSS 4. Its optimized static export is served by the API at `/`, keeping browser calls same-origin. The production image builds the frontend from `apps/web/package-lock.json`; `npm run build` publishes the same export locally. A restrictive Content Security Policy hashes Next's exact inline bootstrap payloads rather than allowing arbitrary inline scripts.
+
+Before authentication the site presents the public FinRisk product, capabilities, account model, and sign-in call to action. After sign-in, a compact trading workspace provides focused Overview, Portfolio, Markets, Risk Alerts, Paper Trading, and Team views. The fixed navigation, command search, portfolio ledger, evidence panels, order ticket, dense tables, responsive mobile navigation, and shared design tokens replace the former stacked static dashboard. All existing workspace, valuation, import, alert, invitation, and paper-order API flows remain available.
+
+Portfolio value, positions, valuation quality, and allocation lead the default workflow; research and execution remain distinct views. Chart/number formatting uses browser numbers for display only; all monetary calculations and stored values remain server-side decimals. Data is loaded on navigation or explicit Refresh; this is not a realtime streaming dashboard.
+
+## 7. Paper trading and the live boundary
 
 Each workspace can open one paper account per currency through `/v1/workspaces/{tenant}/paper-accounts`. Accounts start with 100,000 simulated units. `GET /{account}` returns simulated cash and positions; `GET /{account}/orders` is paginated; `POST /{account}/orders` accepts `client_request_id`, `instrument_id`, `price_bar_id`, `side` and decimal-string `quantity`.
 
@@ -73,6 +85,7 @@ Paper account/order records use forced tenant RLS. Viewers may read but cannot s
 uv run ruff check .
 uv run ruff format --check .
 uv run pytest -q -m "not integration"
+cd apps/web && npm ci && npm run typecheck && npm run build && cd ../..
 docker compose -f docker-compose.yml -f compose.test.yml build
 docker compose -f docker-compose.yml -f compose.test.yml run --rm tests
 uv run --with playwright python scripts/smoke_dashboard.py
@@ -80,4 +93,4 @@ uv run --with playwright python scripts/smoke_dashboard.py
 
 If Chromium is missing, install it with `uv run --with playwright playwright install chromium`. The browser smoke test expects the running seeded demo, creates a dedicated workspace, validates valuation/anomaly/paper buy/sell flows, checks mobile overflow and captures screenshots in `.artifacts/`. It retains its demo records for inspection.
 
-Verified on 2026-09-30: the full backend suite passed 154 tests. After the final small-price quote fix, its targeted integration regression passed again. The final Microsoft Edge browser smoke passed login, workspace creation, sample holdings, valuation, anomaly evidence, simulated buys/sells, logout and mobile overflow checks. Ruff lint/format, JavaScript syntax and Git whitespace checks passed. The local API, development identity issuer, Kafka and PostgreSQL reported healthy.
+Verified on 2026-10-02: the rebuilt production image and full containerized backend suite passed 200 tests, including PostgreSQL/Kafka integration, static frontend security, team invitations, atomic portfolio CSV imports, concurrent risk-scan idempotency, alert deduplication, and tenant role enforcement. The Next.js production export passed TypeScript checking and the Microsoft Edge browser smoke for login, workspace creation, sample holdings, valuation, risk alert creation and acknowledgment, simulated buys/sells, logout, and mobile overflow. PostgreSQL and Kafka reported healthy during this verification run.

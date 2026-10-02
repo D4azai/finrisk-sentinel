@@ -41,6 +41,8 @@ async def open_pool(settings):
             await connection.fetchval("SELECT 1 FROM saas.instruments LIMIT 1")
             await connection.fetchval("SELECT 1 FROM saas.price_bars LIMIT 1")
             await connection.fetchval("SELECT 1 FROM saas.paper_accounts LIMIT 1")
+            await connection.fetchval("SELECT 1 FROM saas.plan_versions LIMIT 1")
+            await connection.fetchval("SELECT 1 FROM saas.portfolio_risk_snapshots LIMIT 1")
     except BaseException:
         await pool.close()
         raise

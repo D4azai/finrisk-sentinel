@@ -171,6 +171,7 @@ async def value_portfolio(conn, tenant, portfolio, now):
                 p["currency"],
             )
             if instrument:
+                p["instrument_id"] = instrument["id"]
                 history = await load_history(conn, instrument, now, limit=1)
                 p["status"], p["reason"] = history["quality"], history["reason"]
                 if history["quality"] in {"demo", "end_of_day"}:

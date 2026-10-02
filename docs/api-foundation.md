@@ -2,7 +2,7 @@
 
 For the subsequent valuation, anomaly, dashboard and paper-trading endpoints, see the [current application workflow](application-workflow.md). This document records the original identity/workspace foundation.
 
-Implemented 2026-09-28. This milestone adds authenticated identities, workspaces, memberships, and isolated portfolio metadata. The subsequent [portfolio ledger](portfolio-ledger.md) adds manual transactions and holdings. CSV imports, valuations, dashboard UI, subscriptions, and team invitations remain subsequent milestones.
+Implemented 2026-09-28 and extended with [team workspace management](team-workspaces.md). This foundation provides authenticated identities, workspaces, expiring invitations, memberships, roles, and isolated portfolio metadata. The subsequent [portfolio ledger](portfolio-ledger.md) adds manual transactions, bounded CSV imports, and holdings. Subscriptions and production provider connections remain subsequent milestones; valuation and the dashboard are implemented in the [application workflow](application-workflow.md).
 
 ## Try it locally
 
@@ -35,7 +35,7 @@ The smoke script does not print tokens. It creates separate demo workspaces, exe
 | PATCH | `/v1/workspaces/{tenant_id}/portfolios/{id}` | Rename with `{ "name": "New name", "version": 1 }`; stale versions return 409 |
 | DELETE | `/v1/workspaces/{tenant_id}/portfolios/{id}` | Owner/admin deletion with an audit entry |
 
-Owners/admins can create, read, rename and delete portfolios. Members can create, read and rename. Viewers can only read. Membership management/invitations are not public endpoints yet; tests seed team roles through the migration principal. A personal account uses an ordinary workspace with an owner membership, so the data model can support teams later.
+Owners/admins can create, read, rename and delete portfolios. Members can create, read and rename. Viewers can only read. Owners and administrators can manage collaborators through the [team invitation API](team-workspaces.md), with stricter controls around owners and administrator roles. A personal account uses an ordinary workspace with an owner membership.
 
 Unauthenticated/invalid tokens return 401, insufficient role privileges 403, and inaccessible or missing workspaces/portfolios 404. Requests cannot assign `tenant_id`, `created_by`, or roles through extra JSON fields. Bodies are capped at 16 KiB with a ten-second read deadline; list sizes are capped at 100. Responses disable caching and include a generated request ID. API documentation exposes schemas, not private records.
 
@@ -70,4 +70,4 @@ The suite includes genuine RSA signature/JWKS tests and PostgreSQL/HTTP tests wi
 
 Windows Time was stopped during verification. Starting the service/resynchronizing was denied by the current Windows session. A machine administrator should enable time synchronization and run `w32tm /resync`, then check actual exchange/container drift. The market-data future-timestamp limit remains intact. Local identity issuance and API verification use the same container-host clock; this does not certify production provider clock synchronization.
 
-Portfolio transactions and holdings are now described in the [ledger milestone](portfolio-ledger.md), including migration 004 and history-preserving deletion behavior. Next: equity instrument/feed integration, valuation/allocation, and evaluated anomaly signals for Moroccan and international markets. Team invitations, billing entitlements, import processing, and broker order execution remain later work.
+Portfolio transactions, CSV imports, and holdings are described in the [ledger milestone](portfolio-ledger.md), and valuation, anomaly signals, paper trading, and the dashboard are described in the [application workflow](application-workflow.md). Team invitations are also implemented. Durable risk jobs, billing entitlements, live market providers, and broker execution remain later work in the [SaaS delivery plan](product-delivery-plan.md).

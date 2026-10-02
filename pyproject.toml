@@ -12,7 +12,7 @@ dev = ["pytest>=9,<10", "pytest-asyncio>=1,<2", "ruff>=0.15,<1", "jsonschema>=4,
 include = ["services*"]
 [tool.setuptools.package-data]
 "services.common" = ["migrations/*.sql"]
-"services.api" = ["static/*"]
+"services.api" = ["static/*", "static/**/*"]
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib"
 testpaths = ["services", "tests"]

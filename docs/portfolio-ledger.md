@@ -44,7 +44,15 @@ Reuse a `client_request_id` only for retries of the same trade within the same p
 
 Holdings return exact quantity, total fees, last execution time, and `net_cash_flow`: sale proceeds minus buy expenditure minus all fees, in each instrument's currency. Cash flow is not profit, cost basis, valuation, or a cash balance. Currencies are never summed together. Quantities remain derived from the immutable ledger. Pagination is live, not a frozen snapshot; restart pagination to capture concurrent inserts that sort before a cursor.
 
-Portfolios with transaction history return 409 on deletion, even after all positions are closed. Corrections/reversals, corporate actions, transfers, dividends, FX valuation, CSV imports, short selling, and broker reconciliation need subsequent workflows. Recorded trades are manual historical entries; these endpoints never submit orders to a broker.
+Portfolios with transaction history return 409 on deletion, even after all positions are closed. Corrections/reversals, corporate actions, transfers, dividends, short selling, and broker reconciliation need subsequent workflows. Recorded trades are historical entries; these endpoints never submit orders to a broker.
+
+## CSV transaction imports
+
+The dashboard and `/transaction-imports` endpoints provide a two-step CSV workflow. Required columns are `market`, `symbol`, `currency`, `side`, `quantity`, `price`, and `executed_at`; `fees` and `client_request_id` are optional. Values use the same exact-decimal, catalog, timestamp, execution-order, currency, and long-only rules as individual transactions.
+
+`POST .../transaction-imports/preview` accepts a client request ID, optional filename, and CSV text. It stores a 24-hour preview with normalized values and per-row errors but does not change the ledger. Repeating the request ID with the same content returns the same preview; different content returns 409. Plaintext CSV is capped at 512 KiB and 500 nonempty rows. Larger files belong on the future durable background-job path.
+
+`POST .../transaction-imports/{id}/commit` is available only to the preview creator. It locks the portfolio and revalidates every row against current holdings and catalog data. All transactions, portfolio versions, import state, and audit events commit atomically; any changed assumption rolls back the entire import. Repeating a completed commit returns its result. `GET .../transaction-imports` returns recent import history. Forced RLS confines preview rows and history to workspace members, while viewer roles remain read-only.
 
 ## Next milestones
 

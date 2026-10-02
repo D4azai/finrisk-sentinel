@@ -38,6 +38,17 @@ class PortfolioView(BaseModel):
     updated_at: datetime
 
 
+class OnboardingCreate(StrictBody):
+    workspace_name: str = Field(min_length=1, max_length=100, pattern=r"^[^\x00-\x1f\x7f]+$")
+    portfolio_name: str = Field(min_length=1, max_length=100, pattern=r"^[^\x00-\x1f\x7f]+$")
+    base_currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
+
+
+class OnboardingView(BaseModel):
+    workspace: WorkspaceView
+    portfolio: PortfolioView
+
+
 class WorkspacePage(BaseModel):
     items: list[WorkspaceView]
     next_cursor: UUID | None

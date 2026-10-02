@@ -1,0 +1,25 @@
+{
+  "name": "finrisk-web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build:next": "next build",
+    "build": "npm run build:next && node scripts/publish.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tailwindcss/postcss": "4.3.3",
+    "lucide-react": "1.49.0",
+    "next": "16.3.8",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "tailwindcss": "4.3.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "typescript": "5.9.3"
+  }
+}

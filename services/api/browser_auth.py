@@ -1,6 +1,7 @@
 """Pinned-endpoint token exchange for a public Authorization Code + PKCE client."""
 
 import json
+import logging
 import time
 from urllib.parse import urlsplit
 
@@ -11,6 +12,8 @@ from pydantic import Field
 
 from services.api.auth import unauthorized
 from services.api.models import StrictBody
+
+logger = logging.getLogger(__name__)
 
 
 class CodeExchange(StrictBody):
@@ -55,6 +58,10 @@ def register_browser_auth(app):
                 timeout=aiohttp.ClientTimeout(total=10),
             ) as response:
                 if response.status != 200:
+                    logger.warning(
+                        "Browser identity token exchange rejected",
+                        extra={"provider_status": response.status},
+                    )
                     if response.status in {400, 401, 403}:
                         raise HTTPException(401, "Sign-in expired or was refused; start again")
                     raise HTTPException(503, "Identity provider unavailable")
@@ -75,10 +82,43 @@ def register_browser_auth(app):
         except (aiohttp.ClientError, TimeoutError, ValueError, TypeError):
             raise HTTPException(503, "Identity provider unavailable") from None
         verifier = request.app.state.verifier
-        identity = await verifier.verify(data["access_token"])
-        login_identity = await verifier.verify_id_token(
-            data["id_token"], nonce=body.nonce, access_token=data["access_token"]
-        )
+        try:
+            identity = await verifier.verify(data["access_token"])
+        except HTTPException:
+            try:
+                header = jwt.get_unverified_header(data["access_token"])
+                claims = jwt.decode(data["access_token"], options={"verify_signature": False})
+                audience = claims.get("aud")
+                audience_matches = (
+                    settings.oidc_audience == audience
+                    or isinstance(audience, list)
+                    and settings.oidc_audience in audience
+                )
+                scope = claims.get("scope")
+                scope_matches = isinstance(scope, str) and (
+                    settings.required_scope in scope.split()
+                )
+                logger.warning(
+                    "Browser access token validation failed "
+                    "(alg_rs256=%s issuer_matches=%s audience_matches=%s "
+                    "scope_matches=%s has_subject=%s integer_times=%s)",
+                    header.get("alg") == "RS256",
+                    claims.get("iss") == settings.oidc_issuer,
+                    audience_matches,
+                    scope_matches,
+                    isinstance(claims.get("sub"), str),
+                    all(type(claims.get(name)) is int for name in ("iat", "exp")),
+                )
+            except (jwt.PyJWTError, TypeError, ValueError):
+                logger.warning("Browser access token is not a decodable JWT")
+            raise
+        try:
+            login_identity = await verifier.verify_id_token(
+                data["id_token"], nonce=body.nonce, access_token=data["access_token"]
+            )
+        except HTTPException:
+            logger.warning("Browser ID token validation failed")
+            raise
         if identity != login_identity:
             raise unauthorized()
         # Signature and all authorization claims were checked above.
