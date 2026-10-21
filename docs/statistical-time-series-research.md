@@ -29,8 +29,8 @@ from services.analytics.statistical_research import analyze_time_series
 # services.analytics.engine.load_history(..., limit=...).
 result = analyze_time_series(
     history,
-    model="arima",          # alternatively "sarima"
-    seasonal_period=5,      # observed trading sessions, not weekdays
+    model="arima",  # alternatively "sarima"
+    seasonal_period=5,  # observed trading sessions, not weekdays
     horizon=5,
     folds=3,
 )
