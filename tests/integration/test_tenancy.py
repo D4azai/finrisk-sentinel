@@ -1012,9 +1012,7 @@ async def test_portfolio_risk_lab_reports_limits_and_saves_evidence(tenant_app):
     assert saved.status_code == 201, saved.text
     snapshot_id = saved.json()["snapshot_id"]
     assert (
-        await client.get(
-            root + f"/risk-lab/snapshots/{snapshot_id}", headers=headers("alice")
-        )
+        await client.get(root + f"/risk-lab/snapshots/{snapshot_id}", headers=headers("alice"))
     ).json() == saved.json()
     assert (
         await client.get(root + f"/risk-lab/snapshots/{snapshot_id}", headers=headers("bob"))
