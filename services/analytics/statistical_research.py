@@ -3,6 +3,7 @@
 The runtime dependencies (numpy/statsmodels) are intentionally optional. This
 module never changes portfolio risk/valuation or produces trading advice.
 """
+
 import math
 from datetime import date
 from statistics import mean
@@ -127,7 +128,8 @@ def analyze_time_series(history, *, model="arima", seasonal_period=5, horizon=5,
     seasonal_variance = float(np.var(decomposition.seasonal + decomposition.resid))
     strength = (
         max(0.0, 1.0 - float(np.var(decomposition.resid)) / seasonal_variance)
-        if seasonal_variance > 0 else 0.0
+        if seasonal_variance > 0
+        else 0.0
     )
     changes = np.diff(log_prices)
     return {
