@@ -1,4 +1,5 @@
 """Contract and synthetic-data tests for optional statistical research module."""
+
 import math
 from datetime import date, timedelta
 from decimal import Decimal
