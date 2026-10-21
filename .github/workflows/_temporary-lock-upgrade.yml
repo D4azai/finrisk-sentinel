@@ -1,0 +1,34 @@
+name: refresh-aiohttp-lockfiles-on-review-branch
+
+on:
+  push:
+    branches: [fix/time-series-research-ci]
+    paths: ["pyproject.toml"]
+
+permissions:
+  contents: write
+
+jobs:
+  update-lock:
+    if: github.repository == 'D4azai/finrisk-sentinel' && github.ref == 'refs/heads/fix/time-series-research-ci'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.10.12"
+          python-version: "3.12.12"
+      - name: Update vulnerable dependency and runtime hashes
+        run: |
+          uv lock --upgrade-package aiohttp
+          uv export --locked --no-dev --no-emit-project --format requirements-txt --output-file requirements.lock --quiet
+          uv sync --locked
+      - name: Commit only updated lockfiles to review branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add uv.lock requirements.lock
+          git diff --cached --exit-code && exit 1 || true
+          git commit -m "Refresh aiohttp security patch and lockfile hashes"
+          git push origin HEAD:fix/time-series-research-ci
