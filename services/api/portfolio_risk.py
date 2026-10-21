@@ -50,7 +50,9 @@ def register_portfolio_risk(app, authenticated, require_write):
                 raise HTTPException(422, str(error)) from error
             if save:
                 if not payload["data_fingerprint"]:
-                    raise HTTPException(422, "Risk analysis needs sufficient data before it can be saved")
+                    raise HTTPException(
+                        422, "Risk analysis needs sufficient data before it can be saved"
+                    )
                 snapshot_id = uuid4()
                 payload["snapshot_id"] = str(snapshot_id)
                 await conn.execute(
