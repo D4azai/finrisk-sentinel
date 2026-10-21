@@ -47,14 +47,11 @@ def summarize_historical_risk(asset_returns, weights, confidence):
         ordered = sorted(returns)
         threshold = ordered[tail_count - 1]
         value_at_risk = max(Decimal(0), -threshold)
-        expected_shortfall = max(
-            Decimal(0), -sum(ordered[:tail_count], Decimal(0)) / tail_count
-        )
+        expected_shortfall = max(Decimal(0), -sum(ordered[:tail_count], Decimal(0)) / tail_count)
         daily_volatility = _sample_stddev(returns)
         annual_volatility = daily_volatility * Decimal(252).sqrt()
         individual_volatility = {
-            key: _sample_stddev([asset_returns[key][day] for day in dates])
-            for key in weights
+            key: _sample_stddev([asset_returns[key][day] for day in dates]) for key in weights
         }
         weighted_individual_volatility = sum(
             (abs(weights[key]) * (individual_volatility[key] or Decimal(0)) for key in weights),
@@ -85,14 +82,10 @@ def summarize_historical_risk(asset_returns, weights, confidence):
                 else None
             )
             risk_contribution = (
-                weights[key] * covariance / portfolio_variance * 100
-                if portfolio_variance
-                else None
+                weights[key] * covariance / portfolio_variance * 100 if portfolio_variance else None
             )
             asset_statistics[key] = {
-                "annualized_volatility_pct": _q(
-                    asset_volatility * Decimal(252).sqrt() * 100
-                ),
+                "annualized_volatility_pct": _q(asset_volatility * Decimal(252).sqrt() * 100),
                 "correlation_to_portfolio": _q(correlation),
                 "volatility_contribution_pct": _q(risk_contribution),
             }
@@ -123,8 +116,10 @@ def summarize_historical_risk(asset_returns, weights, confidence):
 
 def _scenario(scenario_id, name, description, shocks, positions, total):
     impact = sum(
-        (Decimal(str(position["base_value"])) * shocks.get(str(position["instrument_id"]), 0)
-         for position in positions),
+        (
+            Decimal(str(position["base_value"])) * shocks.get(str(position["instrument_id"]), 0)
+            for position in positions
+        ),
         Decimal(0),
     )
     return {
@@ -166,7 +161,9 @@ async def analyze_portfolio_risk(conn, tenant, portfolio, now, confidence, lookb
         return wire(result)
     total = Decimal(str(valuation["total_value"]))
     if total <= 0 or not positions:
-        result["limitations"].append("The portfolio needs a positive net value and an open position.")
+        result["limitations"].append(
+            "The portfolio needs a positive net value and an open position."
+        )
         return wire(result)
 
     returns_by_asset = {}
